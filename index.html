@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Windows 10 EOL – Blue Screen Style Countdown</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="Fan-made Windows 10 End of Support countdown styled like a BSOD." />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main id="screen" aria-live="polite">
+    <div class="content">
+      <div class="sad" aria-hidden="true">:(</div>
+
+      <div class="msg-block">
+        <p class="line primary" id="primaryMsg">
+          Your PC hasn’t run into a problem yet, but Windows 10 support is ending. We’re
+          collecting some nostalgia, and then it’s farewell.
+        </p>
+
+        <p class="line secondary">
+          We’ll “restart” this experience when support concludes so you can see time-since-EOL stats.
+        </p>
+
+        <p class="percent-line">
+          <span id="percentNum">0</span>% complete
+        </p>
+
+        <div class="qr-zone">
+          <canvas id="qr" width="180" height="180" aria-hidden="true"></canvas>
+          <div class="qr-text">
+            <p>
+              For more information about upgrading and staying secure, visit:
+              <span class="linkish">https://www.microsoft.com/windows</span>
+            </p>
+            <p class="support-note">
+              If you call a support person, give them this info:<br/>
+              Stop code: <strong>WINDOWS_10_EOL</strong>
+            </p>
+            <p class="timer-heading" id="timerHeading">Time remaining until End of Support:</p>
+            <div class="countdown" id="countdown">
+              <span><strong id="d">--</strong>d</span>
+              <span><strong id="h">--</strong>h</span>
+              <span><strong id="m">--</strong>m</span>
+              <span><strong id="s">--</strong>s</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="footer-note" id="footerNote">
+          Windows 10 End of Support target: <span id="targetLabel"></span><br/>
+          (Unofficial fan countdown – not affiliated with Microsoft.)
+        </p>
+      </div>
+    </div>
+  </main>
+
+  <noscript>
+    <div class="noscript">
+      JavaScript required for live countdown & progress.
+    </div>
+  </noscript>
+
+  <script src="script.js"></script>
+</body>
+</html>

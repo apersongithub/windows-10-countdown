@@ -6,7 +6,8 @@
 | ![image](https://github.com/user-attachments/assets/d858d90a-c353-4179-bbff-3a1f636ce4dc) | ![unnamed-1](https://github.com/user-attachments/assets/c78eea42-768c-4d9c-81f2-f5b709f5e842) |
 
 ## **🎮 How to Play**
-*❗To get to the game `Double Tab` the QR code or click `Insert`.*
+
+*❗To get to the game to unlock wait for the countdown to end **OR** `Double Tab` the QR code / click `Insert`.*
 
 *📱If you are on mobile you may have to change your `Zoom Level`.*
 

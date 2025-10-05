@@ -195,7 +195,14 @@ let leanMode = true;
 /* Web Audio micro-engine for tiny repeated SFX */
 let waCtx = null;
 const waBuffers = {};
-const WA_KEYS = new Set(['bombTick','catchTiny','catchBlock']);
+/* ==== ADD NEAR OTHER TOP-LEVEL CONSTANTS (after other core constants) ==== */
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile|Silk/i.test(navigator.userAgent);
+
+/* ==== FIND the Web Audio micro-engine WA_KEYS SET and REPLACE IT ==== */
+// Old:
+// const WA_KEYS = new Set(['bombTick','catchTiny','catchBlock']);
+// New (adds bombSpawn):
+const WA_KEYS = new Set(['bombTick','catchTiny','catchBlock','bombSpawn']);
 function ensureAudioCtx(){
   if(!waCtx){
     try{ waCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch{}
@@ -969,7 +976,10 @@ function maybeSpawnBomb(ts){
 function currentActiveBombs(){ return blocks.filter(b=>b.mode==='bomb' && !b._remove).length; }
 function spawnBombBurst(){
   if(currentActiveBombs() >= BOMB_CONFIG.maxConcurrent) return;
+
+  // Always spawn at least one
   spawnBomb();
+
   const ratio  = Math.min(1, score / (BOMB_CONFIG.scoreRampForMulti || 1));
   const chance = BOMB_CONFIG.multiSpawnChanceBase + ratio * BOMB_CONFIG.multiSpawnChanceScoreBoost;
   let extra = 0;
@@ -981,11 +991,27 @@ function spawnBombBurst(){
     } else break;
   }
   const totalSpawned = 1 + extra;
+
+  // AUDIO OPTIMIZATION:
+  // On mobile: single volume‑scaled sound (no echoes, no timers).
+  if (IS_MOBILE){
+    const volScale = Math.min(1, 0.55 + 0.12 * totalSpawned); // linear-ish growth
+    playSfx('bombSpawn', { allowOverlap:true, volumeScale:volScale });
+    return;
+  }
+
+  // Desktop / non-mobile:
+  // Keep echo flavor but cap echoes to reduce timers (max 3).
   playSfx('bombSpawn', { allowOverlap:true, volumeScale:1 });
+  const MAX_ECHOES = 3;
+  const echoes = Math.min(MAX_ECHOES, totalSpawned - 1);
+  if(echoes <= 0) return;
+
   const delayStepMs = 40;
   const falloffPer  = 0.25;
   const minVolume   = 0.15;
-  for(let i=1; i<totalSpawned; i++){
+
+  for(let i=1; i<=echoes; i++){
     const atten=Math.max(minVolume, 1 - i*falloffPer);
     setTimeout(()=> playSfx('bombSpawn',{allowOverlap:true, volumeScale:atten}), i*delayStepMs);
   }
@@ -2368,13 +2394,20 @@ function renderSnipOverlay(){
   ctx.save();
   ctx.fillStyle=SNIP_POWERUP.fadeOverlay;
   ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // Adjustable vertical offset constant (higher number = lower on screen)
+  const SNIP_OVERLAY_TEXT_Y = 140;
+  const SNIP_OVERLAY_TIMER_Y = SNIP_OVERLAY_TEXT_Y + 26;
+
   ctx.font='600 18px Segoe UI,Inter,sans-serif';
   ctx.fillStyle='#ffffff';
   ctx.textAlign='center';
-  ctx.fillText('SNIP MODE: Drag (mouse / 1 finger) or 2-finger box', canvas.width/2, 70);
+  ctx.fillText('SNIP MODE: Drag mouse or finger', canvas.width/2, SNIP_OVERLAY_TEXT_Y);
+
   const remaining=Math.max(0,SNIP_POWERUP.aimTimeoutMs - (performance.now() - snipAimStart));
   ctx.font='500 13px Segoe UI,Inter,sans-serif';
-  ctx.fillText(`${Math.ceil(remaining/1000)}s`, canvas.width/2, 96);
+  ctx.fillText(`${Math.ceil(remaining/1000)}s`, canvas.width/2, SNIP_OVERLAY_TIMER_Y);
+
   if(snipRect){
     ctx.strokeStyle=SNIP_POWERUP.outlineColor;
     ctx.lineWidth=SNIP_POWERUP.strokeWidth;
@@ -2725,7 +2758,7 @@ function endGame(victory = false){
   if (infiniteMode){
     if(!victory && REDIRECT_ON_LOSS && INFINITE_REDIRECT_ON_LOSS){
       playSfx('gameOver');
-      window.location.href = LOSS_REDIRECT_URL;
+      window.location.replace(LOSS_REDIRECT_URL);
       return;
     }
     finalizeInfiniteScreen();

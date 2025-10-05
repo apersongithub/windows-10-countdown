@@ -19,7 +19,7 @@ export const LS_KEYS = {
 
 export const MUSIC = {
   enabled: true,
-  volumeMaster: 0.15,            // Overall music volume (independent of SFX master)
+  volumeMaster: 0.15,
   tracks: {
     normal:   'audio/music_normal.mp3',
     boss:     'audio/music_boss.mp3',
@@ -27,15 +27,13 @@ export const MUSIC = {
   },
   fadeInMs: 1200,
   fadeOutMs: 900,
-  crossfadeMs: 1600,             // If switching directly (normal -> boss), overrides individual fades
-  pauseDuckFactor: 0.35,         // Volume multiplier while paused (optional)
-  resumeFadeMs: 500              // Fade back after unpausing
+  crossfadeMs: 1600,
+  pauseDuckFactor: 0.35,
+  resumeFadeMs: 500
 };
 
-/* Soundwave unlock localStorage key */
 export const SOUNDWAVE_UNLOCK_KEY = 'defendUpdatesSoundwaveUnlocked';
 
-/* ===== Countdown / Disintegration ===== */
 export const COUNTDOWN_CONFIG = {
   progressStart: { y: 2024, m: 10, d: 14, h: 0, min: 0, s: 0 },
   target:        { y: 2025, m: 10, d: 14, h: 0, min: 0, s: 0 },
@@ -56,7 +54,6 @@ export const DISINTEGRATION_CONFIG = {
   qrDotDensity: 7
 };
 
-/* ===== Life Block ===== */
 export const LIFE_BLOCK = {
   normalInterval: 25,
   infiniteInterval: 50,
@@ -78,7 +75,6 @@ export const LIFE_BLOCK = {
   showPlusFallback: true
 };
 
-/* ===== Audio Configuration ===== */
 export const AUDIO = {
   enabled: true,
   volumeMaster: 0.85,
@@ -114,12 +110,12 @@ export const AUDIO = {
     taskmgrSpawn: 0.75,
     taskmgrPickup: 0.95,
     taskmgrExecute: 1.0,
-    soundwaveSpawn: 0.85,
+    soundwaveSpawn:  0.85,
     soundwavePickup: 1.0,
-    soundwavePulse: 0.9,
-    stickySpawn: 0.75,
-    stickyHit: 1.0,
-    stickyEnd: 0.8
+    soundwavePulse:  0.9,
+    stickySpawn:     0.75,
+    stickyHit:       1.0,
+    stickyEnd:       0.8
   },
   files: {
     catchBlock:     'audio/catch_block.mp3',
@@ -164,7 +160,6 @@ export const AUDIO = {
   }
 };
 
-/* ===== Taskbar Paddle Style ===== */
 export const TASKBAR_STYLE = {
   enabled: true,
   pixel: 2,
@@ -187,7 +182,6 @@ export const TASKBAR_STYLE = {
   textColor: '#2b2b2b'
 };
 
-/* ===== Bomb Config ===== */
 export const BOMB_CONFIG = {
   enabled: true,
   size: 50,
@@ -221,7 +215,6 @@ export const BOMB_CONFIG = {
   explosionShardSizeRange: [4, 14]
 };
 
-/* ===== SNIP Power-Up ===== */
 export const SNIP_POWERUP = {
   enabled: true,
   label: 'SNIP',
@@ -252,7 +245,6 @@ export const SNIP_POWERUP = {
   executeShakeDuration: 220
 };
 
-/* ===== SHIELD Power-Up ===== */
 export const SHIELD_POWERUP = {
   enabled: true,
   label: 'SHD',
@@ -285,7 +277,6 @@ export const SHIELD_POWERUP = {
   hudTagColor: '#64c9ff'
 };
 
-/* ===== TASK MANAGER Power-Up ===== */
 export const TASKMGR_POWERUP = {
   enabled: true,
   label: 'TM',
@@ -319,10 +310,13 @@ export const TASKMGR_POWERUP = {
   slowMoEnabled: true,
   slowMoFactor: 0.55,
   slowMoDurationMs: 900,
-  globalFlash: 'rgba(255,235,130,0.22)'
+  globalFlash: 'rgba(255,235,130,0.22)',
+  /* NEW: also wipe hazards & powerups (no benefits granted) */
+  affectPowerups: true,
+  affectHazards: true,
+  removedVanishColor: 'rgba(255,210,77,0.35)'
 };
 
-/* ===== SOUNDWAVE Power-Up ===== */
 export const SOUNDWAVE_POWERUP = {
   enabled: true,
   label: 'SND',
@@ -358,7 +352,6 @@ export const SOUNDWAVE_POWERUP = {
   ringColor: 'rgba(160,120,255,0.50)'
 };
 
-/* ===== STICKY KEYS Hazard ===== */
 export const STICKY_KEYS = {
   enabled: true,
   label: 'STK',
@@ -380,19 +373,16 @@ export const STICKY_KEYS = {
   textColor: '#ffffff',
   iconScale: 0.75,
   showLabelFallback: true,
-  /* Lock animation image configuration */
   lockLockedSrc: 'static/locked.png',
   lockUnlockedSrc: 'static/unlocked.png',
   lockDrawWidth: 64,
   lockDrawHeight: 64,
   lockBaseScale: 1.0,
-  lockYOffset: 30   // distance above paddle center point
+  lockYOffset: 30
 };
 
-/* ===== High Score Key ===== */
 export const HIGH_SCORE_KEY = LS_KEYS.highScore;
 
-/* ===== Size Tiers ===== */
 export const SIZE_TIERS = [
   { label:'-4KB',    speedFactor:1.55, textColor:'#ffb347', glowColor:'rgba(255,179,71,0.55)' },
   { label:'-16KB',   speedFactor:1.42, textColor:'#ffd257', glowColor:'rgba(255,210,87,0.50)' },
@@ -405,7 +395,6 @@ export const SIZE_TIERS = [
   { label:'-5GB',    speedFactor:0.72, textColor:'#ff4d6d', glowColor:'rgba(255,77,109,0.40)' }
 ];
 
-/* ===== Hazards ===== */
 export const HAZARDS = [
   { label:"inconsistent design", class:"fast",    color:"#ffbf3c", text:"#2c1b00" },
   { label:"forced updates",      class:"fast",    color:"#ff6b2d", text:"#2c1300" },
@@ -421,7 +410,6 @@ export const HAZARDS = [
 
 export const HAZARD_SPEED = { fast:1.0, extreme:1.5 };
 
-/* ===== Difficulty ===== */
 export const DIFFICULTY = {
   baseSpawnInterval: 950,
   minSpawnInterval: 230,
@@ -434,7 +422,6 @@ export const DIFFICULTY = {
   lives: 5
 };
 
-/* ===== Block Style ===== */
 export const BLOCK_STYLE = {
   textFont: "600 17px Segoe UI, Inter, sans-serif",
   textColor: "#0078d7",
@@ -444,14 +431,12 @@ export const BLOCK_STYLE = {
   cornerRadius: 6
 };
 
-/* ===== Effects ===== */
 export const EFFECTS = {
   missFlash: "rgba(255,60,60,0.35)",
   catchFlash: "rgba(100,255,160,0.33)",
   flashDuration: 140
 };
 
-/* ===== Boss Config ===== */
 export const BOSS_CONFIG = {
   triggerScore: 75,
   health: 60,
@@ -470,7 +455,6 @@ export const BOSS_CONFIG = {
   logoSrc: 'static/Microsoft_Logo.svg'
 };
 
-/* ===== Nuke Config ===== */
 export const NUKE_CONFIG = {
   spinnerIncrementBase: 0.035,
   spinnerRandomAdd: 1.0,

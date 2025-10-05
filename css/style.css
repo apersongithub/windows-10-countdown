@@ -166,17 +166,17 @@ body {
     }
 }
 
-/* Play Prompt */
+/* Base Play Prompt (static) */
 #play-prompt {
     position: fixed;
-    bottom: 400px;
+    bottom: 200px;
     left: 50%;
     transform: translateX(-50%);
     background: rgba(255, 255, 255, 0.12);
     color: #fff;
     font-size: 12px;
     padding: 6px 14px;
-    border-radius: 999px;
+    border-radius: 8px;
     letter-spacing: .7px;
     backdrop-filter: blur(4px);
     display: none;
@@ -187,7 +187,12 @@ body {
 }
 
 #play-prompt:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+#play-prompt:active {
     background: rgba(255, 255, 255, 0.22);
+    transform: translateX(-50%) scale(.95);
 }
 
 .pulse {
@@ -302,8 +307,9 @@ body {
 
 /* Append (or ensure these exist) for tutorial overlay button styling if desired */
 #tutorial-overlay button#tutorial-start:hover {
-  filter:brightness(1.08);
+    filter: brightness(1.08);
 }
+
 #tutorial-overlay button#tutorial-start:active {
-  transform:scale(.94);
+    transform: scale(.94);
 }

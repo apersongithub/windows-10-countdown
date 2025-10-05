@@ -203,6 +203,53 @@ const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile|Silk/i.test(navigator.userAge
 // const WA_KEYS = new Set(['bombTick','catchTiny','catchBlock']);
 // New (adds bombSpawn):
 const WA_KEYS = new Set(['bombTick','catchTiny','catchBlock','bombSpawn']);
+function isPowerupMode(mode){
+  return ['life','snip','shield','taskmgr','soundwave','sticky'].includes(mode);
+}
+function isHazardMode(mode){
+  return mode === 'bomb' || mode === 'bossHazard';
+}
+
+let playPromptStyleInjected = false;
+function ensurePlayPromptStyle(){
+  if(playPromptStyleInjected) return;
+  const style = document.createElement('style');
+  style.id = 'play-prompt-dynamic-style';
+  style.textContent = `
+    /* Modifier classes only (base styles come from global CSS now) */
+
+    /* Compact when vertical space is tighter */
+    #play-prompt.play-prompt--compact {
+      bottom:calc(env(safe-area-inset-bottom, 0px) + clamp(80px, 18vh, 200px));
+      font-size:clamp(11px, 10px + 0.35vw, 14px);
+      padding:clamp(5px, 4px + 0.35vh, 7px) clamp(12px, 10px + 0.6vw, 18px);
+    }
+
+    /* Ultra compact for very short heights */
+    #play-prompt.play-prompt--ultra {
+      bottom:calc(env(safe-area-inset-bottom, 0px) + 20px);
+      font-size:clamp(10px, 9px + 0.3vw, 12px);
+      padding:4px 10px;
+    }
+
+    /* Center vertically for very tall, narrow portrait */
+    #play-prompt.play-prompt--center {
+      top:50%;
+      bottom:auto;
+      transform:translate(-50%, -50%);
+    }
+
+    @media (prefers-reduced-motion:reduce){
+      #play-prompt:active {
+        transform:translateX(-50%);
+      }
+    }
+  `;
+  document.head.appendChild(style);
+  playPromptStyleInjected = true;
+}
+
+
 function ensureAudioCtx(){
   if(!waCtx){
     try{ waCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch{}
@@ -757,6 +804,8 @@ function drawTaskbarPaddle(x,y,width){
 /* -------------------- Public API -------------------- */
 export function showPlayPrompt(){
   const el=document.getElementById('play-prompt');
+  if(!el) return;
+  ensurePlayPromptStyle();
   el.textContent=infiniteUnlocked
     ? 'Press G to play (boss) or I for Infinite Mode'
     : 'Press G to defend against the update';
@@ -1438,9 +1487,11 @@ function activateTaskManager(){
 
   let clearedNormal=0;
   const now=performance.now();
+
   for(let i=blocks.length-1;i>=0;i--){
     const b=blocks[i];
-    if(['life','snip','shield','taskmgr','soundwave','sticky','bossHazard'].includes(b.mode)) continue;
+    if(b.caught) continue;
+
     if(b.mode==='normal'){
       clearedNormal++;
       score+=TASKMGR_POWERUP.awardScorePerNormal;
@@ -1449,22 +1500,64 @@ function activateTaskManager(){
       blocks.splice(i,1);
       continue;
     }
+
     if(b.mode==='bomb' && TASKMGR_POWERUP.affectBombs){
       if(TASKMGR_POWERUP.bombExplode){
         if(!b.exploding){
           b.exploding=true; b.explodeStart=now;
-          spawnBombShards(b);
-          spawnRingPulse(b.x+b.w/2,b.y+b.h/2,'rgba(255,140,50,0.55)',90,520);
-          playSfx('bombExplode');
+            spawnBombShards(b);
+            spawnRingPulse(b.x+b.w/2,b.y+b.h/2,'rgba(255,140,50,0.55)',90,520);
+            playSfx('bombExplode');
         }
       } else {
+        spawnPowerupVanishFX({
+          x:b.x+b.w/2,y:b.y+b.h/2,
+          img:bombImg,imgReady:bombImgReady,
+          label:'',color:TASKMGR_POWERUP.removedVanishColor,
+          iconScale:0.7,baseRadius:b.w/2
+        });
         blocks.splice(i,1);
       }
+      continue;
+    }
+
+    if( (TASKMGR_POWERUP.affectPowerups && isPowerupMode(b.mode)) ||
+        (TASKMGR_POWERUP.affectHazards && isHazardMode(b.mode)) ){
+
+      let refImg=null, refReady=false, iconScale=0.7;
+      if(b.mode==='life'){ refImg=lifeImg; refReady=lifeImgReady; iconScale=LIFE_BLOCK.iconScale; }
+      else if(b.mode==='snip'){ refImg=snipImg; refReady=snipImgReady; }
+      else if(b.mode==='shield'){ refImg=shieldImg; refReady=shieldImgReady; iconScale=SHIELD_POWERUP.iconScale; }
+      else if(b.mode==='taskmgr'){ refImg=taskMgrImg; refReady=taskMgrImgReady; iconScale=TASKMGR_POWERUP.iconScale; }
+      else if(b.mode==='soundwave'){ refImg=soundwaveImg; refReady=soundwaveImgReady; iconScale=SOUNDWAVE_POWERUP.iconScale; }
+      else if(b.mode==='sticky'){ refImg=stickyImg; refReady=stickyImgReady; iconScale=STICKY_KEYS.iconScale; }
+
+      spawnPowerupVanishFX({
+        x:b.x + b.w/2,
+        y:b.y + b.h/2,
+        img:refImg,
+        imgReady:refReady,
+        label:(refImg||b.mode==='bossHazard')?'':b.label,
+        color:TASKMGR_POWERUP.removedVanishColor,
+        iconScale,
+        baseRadius:Math.min(b.w,b.h)/2
+      });
+      blocks.splice(i,1);
+      continue;
     }
   }
-  spawnFloatText(canvas.width/2,canvas.height/2 - 40,
-    clearedNormal?`TASK MANAGER: Cleared ${clearedNormal}`:'TASK MANAGER: No Blocks',
-    '#ffe684', -90, 1400, 1.15);
+
+  spawnFloatText(
+    canvas.width/2,
+    canvas.height/2 - 40,
+    clearedNormal
+      ? `TASK MANAGER: Ended ${clearedNormal} tasks`
+      : 'TASK MANAGER: Wiped powerups/hazards',
+    '#ffe684',
+    -90,
+    1400,
+    1.05
+  );
 
   if(TASKMGR_POWERUP.slowMoEnabled){
     slowMoActive=true;

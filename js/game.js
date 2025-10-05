@@ -17,6 +17,12 @@ import { randBetween, roundedRect } from './utils.js';
 import { triggerNuke } from './nuke.js';
 import { MUSIC } from './config.js';
 
+// Stop any loop when page is being hidden (helps prevent stale BFCache resurrection)
+window.addEventListener('pagehide', () => {
+  try { cancelAnimationFrame(rafId); } catch {}
+  gameActive = false;
+});
+
 /* -------------------- Additional Unlock / Redirect Options -------------------- */
 const STICKY_UNLOCK_KEY = 'defendUpdatesStickyUnlocked';
 const STICKY_SCORE_UNLOCK_THRESHOLD = 500;
@@ -2105,6 +2111,11 @@ function drawStickyHazard(b,now){
 /* -------------------- Game Loop -------------------- */
 function gameLoop(ts){
   if(!gameActive || gamePaused || nukeTriggered) return;
+  if (lives <= 0) {
+  // Prevent “playing without lives” if resurrected from BFCache.
+  gameActive = false;
+  return;
+}
   frameCounter++;
   const rawDt=(ts - lastTs)/1000;
   const dt=adjustDtForSlowMo(rawDt);
@@ -2758,7 +2769,9 @@ function endGame(victory = false){
   if (infiniteMode){
     if(!victory && REDIRECT_ON_LOSS && INFINITE_REDIRECT_ON_LOSS){
       playSfx('gameOver');
-      window.location.replace(LOSS_REDIRECT_URL);
+  try { sessionStorage.setItem('lossRedirected','1'); } catch {}
+  // Use replace so the game page isn’t kept in history (optional but helps)
+  window.location.replace(LOSS_REDIRECT_URL);
       return;
     }
     finalizeInfiniteScreen();
@@ -2777,7 +2790,9 @@ function endGame(victory = false){
   if (shouldNuke){
     if (REDIRECT_ON_LOSS){
       playSfx('gameOver');
-      window.location.href = LOSS_REDIRECT_URL;
+  try { sessionStorage.setItem('lossRedirected','1'); } catch {}
+  // Use replace so the game page isn’t kept in history (optional but helps)
+  window.location.replace(LOSS_REDIRECT_URL);
       return;
     }
     playSfx('nuke');

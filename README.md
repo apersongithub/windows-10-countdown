@@ -6,6 +6,7 @@
 | ![image](https://github.com/user-attachments/assets/d858d90a-c353-4179-bbff-3a1f636ce4dc) | ![unnamed-1](https://github.com/user-attachments/assets/c78eea42-768c-4d9c-81f2-f5b709f5e842) |
 
 ## **🎮 How to Play**
+To get to the game `Double Tab` the QR code or click `Insert`.
 
 Use the cursor (the User's focus) to navigate the Taskbar's limited vertical axis and intercept the incoming code blocks. Avoid any hazards at all costs.
 

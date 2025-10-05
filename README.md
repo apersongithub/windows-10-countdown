@@ -8,6 +8,9 @@
 ## **🎮 How to Play**
 *❗To get to the game `Double Tab` the QR code or click `Insert`.*
 
+*📱If you are on mobile you may have to change your `Zoom Level`.*
+
+
 Use the cursor (the User's focus) to navigate the Taskbar's limited vertical axis and intercept the incoming code blocks. Avoid any hazards at all costs.
 
 Note: You aren't supposed to dodge the boss' hazards

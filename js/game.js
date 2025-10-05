@@ -122,7 +122,14 @@ let stickyLockImgClosed=null, stickyLockImgClosedReady=false;
 let stickyLockImgOpen=null, stickyLockImgOpenReady=false;
 
 /* Audio */
-const audioBank={}; let audioLoaded=false;
+/* -------------------- Audio (with pooling + safe fail) -------------------- */
+const AUDIO_LOAD_TIMEOUT_MS = 5000;        // Give each file up to 5s to become playable
+const LOG_MISSING_AUDIO_ONCE = false;      // Set true if you want one console.warn per missing key
+
+let audioLoaded = false;
+const audioBank = {};
+const unavailableAudio = new Set();        // Keys that failed or timed out
+const missingWarned = new Set();           // Tracks which keys we've warned about (if logging)
 
 /* Music System */
 const musicBank = {};
@@ -395,16 +402,49 @@ function loadAllImages(){
 }
 
 /* -------------------- Audio (with pooling) -------------------- */
+
 function loadAudioBank(){
-  if(audioLoaded || !AUDIO.enabled) return;
-  for(const [key,path] of Object.entries(AUDIO.files)){
-    if(!path) continue;
-    const a=new Audio(path);
-    a.preload='auto';
-    a.volume=(AUDIO.volumeMaster??1)*(AUDIO.perClipVolume?.[key] ?? 1);
-    audioBank[key]=a;
+  if (audioLoaded || !AUDIO.enabled) return;
+
+  for (const [key, path] of Object.entries(AUDIO.files)){
+    if (!path) continue; // ignore blank paths
+
+    const a = new Audio();
+    a.preload = 'auto';
+    a.src = path;
+    a.volume = (AUDIO.volumeMaster ?? 1) * (AUDIO.perClipVolume?.[key] ?? 1);
+
+    let done = false;
+    const timeoutId = setTimeout(() => {
+      if (done) return;
+      done = true;
+      markAudioUnavailable(key, `timeout after ${AUDIO_LOAD_TIMEOUT_MS}ms`);
+    }, AUDIO_LOAD_TIMEOUT_MS);
+
+    a.addEventListener('canplaythrough', () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeoutId);
+      audioBank[key] = a; // only store once we know it's playable
+    }, { once:true });
+
+    a.addEventListener('error', () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeoutId);
+      markAudioUnavailable(key, 'error event');
+    }, { once:true });
   }
-  audioLoaded=true;
+
+  audioLoaded = true;
+}
+
+function markAudioUnavailable(key, reason){
+  unavailableAudio.add(key);
+  if (LOG_MISSING_AUDIO_ONCE && !missingWarned.has(key)){
+    console.warn(`[audio] Disabled "${key}" (${reason})`);
+    missingWarned.add(key);
+  }
 }
 
 const SFX_POOL_KEYS = new Set(['bombTick','bombSpawn','catchTiny','catchBlock']);
@@ -412,49 +452,78 @@ const sfxPools = {};
 const POOL_SIZE = 4;
 let lastPlayTimePerKey = Object.create(null);
 
-function playSfx(key,{allowOverlap=true, volumeScale=1} = {}){
-  if(!AUDIO.enabled) return;
-  const baseClip=audioBank[key];
-  if(!baseClip) return;
+function playSfx(key, { allowOverlap = true, volumeScale = 1 } = {}){
+  if (!AUDIO.enabled) return;
+  if (unavailableAudio.has(key)) return;          // Skip known bad keys
 
-  const now=performance.now();
-  if(key==='bombTick'){
-    if(lastPlayTimePerKey[key] && now - lastPlayTimePerKey[key] < 80) return;
-    lastPlayTimePerKey[key]=now;
+  const baseClip = audioBank[key];
+  // Not loaded yet (maybe still buffering) => skip quietly
+  if (!baseClip || baseClip.readyState < 2) return;
+
+  // Light spam control for very frequent tick
+  const now = performance.now();
+  if (key === 'bombTick'){
+    if (lastPlayTimePerKey[key] && now - lastPlayTimePerKey[key] < 80) return;
+    lastPlayTimePerKey[key] = now;
   }
 
-  const baseVol=(AUDIO.volumeMaster ?? 1)*(AUDIO.perClipVolume?.[key] ?? 1);
-  const finalVol=Math.min(1, baseVol * volumeScale);
+  const baseVol = (AUDIO.volumeMaster ?? 1) * (AUDIO.perClipVolume?.[key] ?? 1);
+  const finalVol = Math.min(1, baseVol * volumeScale);
 
-  if(!SFX_POOL_KEYS.has(key)){
-    if(allowOverlap){
-      const clone=baseClip.cloneNode();
-      clone.volume=finalVol;
-      try{ clone.currentTime=0; clone.play(); }catch{}
+  // Non‑pooled keys
+  if (!SFX_POOL_KEYS.has(key)){
+    if (allowOverlap){
+      // Clone only if we know it can play
+      try {
+        const clone = baseClip.cloneNode();
+        // If clone has no src or not ready; skip (rare but safe)
+        if (!clone || !clone.play) return;
+        clone.volume = finalVol;
+        clone.currentTime = 0;
+        clone.play().catch(()=>{ /* swallow */ });
+      } catch {
+        /* swallow */
+      }
       return;
     }
-    if(!baseClip.paused) return;
-    baseClip.volume=finalVol;
-    try{ baseClip.currentTime=0; baseClip.play(); }catch{}
+    // No overlap path
+    if (!baseClip.paused) return;
+    try {
+      baseClip.volume = finalVol;
+      baseClip.currentTime = 0;
+      baseClip.play().catch(()=>{ /* swallow */ });
+    } catch {}
     return;
   }
 
-  if(!sfxPools[key]){
-    sfxPools[key]={ voices:[], idx:0 };
-    for(let i=0;i<POOL_SIZE;i++){
-      const v=baseClip.cloneNode();
-      v.volume=finalVol;
-      sfxPools[key].voices.push(v);
+  // Pooled keys (to reduce excessive clone creation)
+  if (!sfxPools[key]){
+    sfxPools[key] = { voices:[], idx:0 };
+    for (let i=0;i<POOL_SIZE;i++){
+      try {
+        const v = baseClip.cloneNode();
+        if (!v || !v.play) continue;
+        v.volume = finalVol;
+        sfxPools[key].voices.push(v);
+      } catch {}
+    }
+    // If pool creation fails or is empty => mark unavailable to silence further attempts
+    if (sfxPools[key].voices.length === 0){
+      markAudioUnavailable(key, 'pool creation failed');
+      return;
     }
   }
-  const pool=sfxPools[key];
-  const voice=pool.voices[pool.idx];
-  pool.idx=(pool.idx+1)%pool.voices.length;
-  voice.volume=finalVol;
-  try{
-    voice.currentTime=0;
-    voice.play();
-  }catch{}
+
+  const pool = sfxPools[key];
+  const voice = pool.voices[pool.idx];
+  pool.idx = (pool.idx + 1) % pool.voices.length;
+
+  if (!voice || !voice.play) return;
+  try {
+    voice.volume = finalVol;
+    voice.currentTime = 0;
+    voice.play().catch(()=>{ /* swallow */ });
+  } catch {}
 }
 
 /* -------------------- SIZE_TIER Precomputation -------------------- */

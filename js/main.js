@@ -232,7 +232,7 @@ window.addEventListener('nuke:close', () => {
     if (document.getElementById(ID)) return;
     const div = document.createElement('div');
     div.id = ID;
-    div.textContent = 'Insert: Skip countdown  •  Delete: Reset data';
+    div.textContent = 'Ins/Double Tap QR: Skip countdown  •  Delete: Reset data';
     div.style.cssText = `
       position:fixed;
       bottom:10px;
@@ -249,7 +249,7 @@ window.addEventListener('nuke:close', () => {
       -webkit-font-smoothing:antialiased;
       pointer-events:none;
       user-select:none;
-      max-width:260px;
+      max-width:360px;
       text-align:center;
       line-height:1.25;
     `;
@@ -267,4 +267,107 @@ window.addEventListener('nuke:close', () => {
   // Console helpers
   window._skipCountdownNow = () => bypassCountdownAndStart('boss');
   window._resetGameData    = resetDataAndReload;
+})();
+
+/* === Double‑Tap (or rapid double click) on #qr-image => Skip Countdown (Insert equivalent) === */
+(function enableQrDoubleTapSkip() {
+  const EL_ID = 'qr-image';
+  const POST_STAGE_KEY = (typeof LS_KEYS !== 'undefined' && LS_KEYS.postStage)
+    ? LS_KEYS.postStage
+    : 'defendUpdatesPostStage';
+
+  // Timing / movement thresholds
+  const DOUBLE_TAP_MS   = 340;
+  const MIN_INTERVAL_MS = 50;   // ignore ultra-fast ghost taps
+  const MOVE_TOLERANCE  = 28;   // px finger drift allowed
+
+  let lastTime = 0;
+  let lastX = 0;
+  let lastY = 0;
+
+  function doSkip() {
+    // Prefer in‑page bypass (no reload)
+    if (typeof window._skipCountdownNow === 'function') {
+      window._skipCountdownNow();
+      return;
+    }
+    // Next: minimal force skip (reload)
+    if (typeof window._forceSkipCountdown === 'function') {
+      window._forceSkipCountdown();
+      return;
+    }
+    // Fallback: set flag & reload (cache-busted)
+    try { localStorage.setItem(POST_STAGE_KEY, '1'); } catch {}
+    const base = location.origin + location.pathname;
+    location.replace(base + '?skip=' + Date.now());
+  }
+
+  function isDoubleTap(ev) {
+    const now = performance.now();
+    let x, y;
+    if (ev.changedTouches && ev.changedTouches.length) {
+      const t = ev.changedTouches[0];
+      x = t.clientX;
+      y = t.clientY;
+    } else {
+      x = ev.clientX;
+      y = ev.clientY;
+    }
+    const dt = now - lastTime;
+    const dx = Math.abs(x - lastX);
+    const dy = Math.abs(y - lastY);
+    lastTime = now;
+    lastX = x;
+    lastY = y;
+    return (dt > MIN_INTERVAL_MS && dt < DOUBLE_TAP_MS && dx < MOVE_TOLERANCE && dy < MOVE_TOLERANCE);
+  }
+
+  function attach(el) {
+    if (!el || el.__qrSkipBound) return;
+    el.__qrSkipBound = true;
+
+    const handler = (ev) => {
+      // Ignore multi-touch (pinch zoom, etc.)
+      if (ev.touches && ev.touches.length > 1) return;
+      if (isDoubleTap(ev)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        doSkip();
+      }
+    };
+
+    // Pointer events preferred; fallback to touchend/mouseup
+    if (window.PointerEvent) {
+      el.addEventListener('pointerup', handler, { passive: false });
+    } else {
+      el.addEventListener('touchend', handler, { passive: false });
+      el.addEventListener('mouseup', handler);
+    }
+  }
+
+  function init() {
+    const el = document.getElementById(EL_ID);
+    if (el) {
+      attach(el);
+    } else {
+      // If it may appear slightly later, observe briefly
+      const obs = new MutationObserver(() => {
+        const found = document.getElementById(EL_ID);
+        if (found) {
+          attach(found);
+          obs.disconnect();
+        }
+      });
+      try {
+        obs.observe(document.documentElement, { childList: true, subtree: true });
+        setTimeout(()=>obs.disconnect(), 5000);
+      } catch {}
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();

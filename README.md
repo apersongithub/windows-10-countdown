@@ -9,12 +9,11 @@
 
 *❗To get to the game to unlock wait for the countdown to end **OR** `Double Tab` the QR code / click `Insert`.*
 
-*📱If you are on mobile you may have to change your `Zoom Level`.*
+*If you are on mobile you may have to change your `Zoom Level`.*
 
+Use the cursor to navigate the Taskbar's limited vertical axis and intercept the incoming code blocks. Avoid any hazards at all costs (unless you are fighting the boss).
 
-Use the cursor (the User's focus) to navigate the Taskbar's limited vertical axis and intercept the incoming code blocks. Avoid any hazards at all costs.
-
-Note: You aren't supposed to dodge the boss' hazards
+Note: **For the best experience play on PC**
 
 ## **⚡ Powerups**
 

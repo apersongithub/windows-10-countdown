@@ -452,7 +452,7 @@ export const BOSS_CONFIG = {
   dropSpeedRange: [260, 900],
   damagePerCatch: 1,
   label: 'MICROSOFT',
-  logoSrc: 'static/Microsoft_Logo.svg'
+  logoSrc: 'static/Microsoft_Logo.png'
 };
 
 export const NUKE_CONFIG = {

@@ -2,6 +2,7 @@
    Defender Game - game.js
    Optimized + Victory UI Parity + Sticky Keys Enhanced Panel + Infinite Parity
    + Mobile (Touch) Snipping Tool Support
+   + Core Audio Performance Optimizations (Adaptive + Lean + WebAudio micro cache)
    ============================================================================ */
 
 import {
@@ -121,15 +122,14 @@ let stickyImg=null, stickyImgReady=false;
 let stickyLockImgClosed=null, stickyLockImgClosedReady=false;
 let stickyLockImgOpen=null, stickyLockImgOpenReady=false;
 
-/* Audio */
 /* -------------------- Audio (with pooling + safe fail) -------------------- */
-const AUDIO_LOAD_TIMEOUT_MS = 5000;        // Give each file up to 5s to become playable
-const LOG_MISSING_AUDIO_ONCE = false;      // Set true if you want one console.warn per missing key
+const AUDIO_LOAD_TIMEOUT_MS = 5000;
+const LOG_MISSING_AUDIO_ONCE = false;
 
 let audioLoaded = false;
 const audioBank = {};
-const unavailableAudio = new Set();        // Keys that failed or timed out
-const missingWarned = new Set();           // Tracks which keys we've warned about (if logging)
+const unavailableAudio = new Set();
+const missingWarned = new Set();
 
 /* Music System */
 const musicBank = {};
@@ -175,6 +175,48 @@ let snipMultiTouch = false;
 let snipLastTapTime = 0;
 const SNIP_MIN_TOUCH_SIZE = 18;
 const SNIP_DOUBLE_TAP_MS = 300;
+
+/* -------------------- Adaptive Audio Core (ESSENTIAL ONLY) -------------------- */
+/* Frame-time sampling (no overlay) */
+let perfWindow = [];
+let perfLastSampleTs = 0;
+let audioDegradeLevel = 0; // 0 normal, 1 mild, 2 medium, 3 severe
+const PERF_SAMPLE_INTERVAL = 500;     // ms between samples
+const PERF_WINDOW_MS = 5000;          // rolling window size
+const PERF_THRESHOLDS = [26, 32, 40]; // average frame time ms boundaries -> levels
+
+/* Lean SFX groups (coalesces spammy events at degrade >=2) */
+const LEAN_GROUPS = {
+  ticks:   { keys:new Set(['bombTick']),            minGap:180, lastPlay:0, proxy:'bombTick' },
+  catches: { keys:new Set(['catchTiny','catchBlock']), minGap:140, lastPlay:0, proxy:'catchBlock' }
+};
+let leanMode = true;
+
+/* Web Audio micro-engine for tiny repeated SFX */
+let waCtx = null;
+const waBuffers = {};
+const WA_KEYS = new Set(['bombTick','catchTiny','catchBlock']);
+function ensureAudioCtx(){
+  if(!waCtx){
+    try{ waCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch{}
+  }
+}
+async function loadWebAudioBuffers(){
+  if(!AUDIO.enabled) return;
+  ensureAudioCtx();
+  if(!waCtx) return;
+  const entries = Object.entries(AUDIO.files).filter(([k])=>WA_KEYS.has(k));
+  for(const [k, path] of entries){
+    if(waBuffers[k]) continue;
+    try{
+      const resp = await fetch(path);
+      const arr = await resp.arrayBuffer();
+      waBuffers[k] = await waCtx.decodeAudioData(arr);
+    }catch{
+      // Silent fail; fallback to HTMLAudio path
+    }
+  }
+}
 
 /* -------------------- HUD Helpers -------------------- */
 function markHudDirty(){ hudDirty=true; }
@@ -401,129 +443,160 @@ function loadAllImages(){
   loadStickyLockImages();
 }
 
-/* -------------------- Audio (with pooling) -------------------- */
-
+/* -------------------- Audio Loading -------------------- */
 function loadAudioBank(){
   if (audioLoaded || !AUDIO.enabled) return;
-
   for (const [key, path] of Object.entries(AUDIO.files)){
-    if (!path) continue; // ignore blank paths
-
+    if (!path) continue;
     const a = new Audio();
-    a.preload = 'auto';
-    a.src = path;
-    a.volume = (AUDIO.volumeMaster ?? 1) * (AUDIO.perClipVolume?.[key] ?? 1);
-
-    let done = false;
-    const timeoutId = setTimeout(() => {
-      if (done) return;
-      done = true;
+    a.preload='auto';
+    a.src=path;
+    a.volume=(AUDIO.volumeMaster ?? 1)*(AUDIO.perClipVolume?.[key] ?? 1);
+    let done=false;
+    const timeoutId=setTimeout(()=>{
+      if(done) return;
+      done=true;
       markAudioUnavailable(key, `timeout after ${AUDIO_LOAD_TIMEOUT_MS}ms`);
     }, AUDIO_LOAD_TIMEOUT_MS);
-
-    a.addEventListener('canplaythrough', () => {
-      if (done) return;
-      done = true;
+    a.addEventListener('canplaythrough',()=>{
+      if(done) return;
+      done=true;
       clearTimeout(timeoutId);
-      audioBank[key] = a; // only store once we know it's playable
+      audioBank[key]=a;
     }, { once:true });
-
-    a.addEventListener('error', () => {
-      if (done) return;
-      done = true;
+    a.addEventListener('error',()=>{
+      if(done) return;
+      done=true;
       clearTimeout(timeoutId);
-      markAudioUnavailable(key, 'error event');
+      markAudioUnavailable(key,'error event');
     }, { once:true });
   }
-
-  audioLoaded = true;
+  audioLoaded=true;
 }
-
 function markAudioUnavailable(key, reason){
   unavailableAudio.add(key);
-  if (LOG_MISSING_AUDIO_ONCE && !missingWarned.has(key)){
+  if(LOG_MISSING_AUDIO_ONCE && !missingWarned.has(key)){
     console.warn(`[audio] Disabled "${key}" (${reason})`);
     missingWarned.add(key);
   }
 }
 
+/* Pools for certain keys */
 const SFX_POOL_KEYS = new Set(['bombTick','bombSpawn','catchTiny','catchBlock']);
 const sfxPools = {};
 const POOL_SIZE = 4;
 let lastPlayTimePerKey = Object.create(null);
 
-function playSfx(key, { allowOverlap = true, volumeScale = 1 } = {}){
+/* -------------------- playSfx (with adaptive + lean + webaudio) -------------------- */
+function playSfx(initialKey, { allowOverlap = true, volumeScale = 1 } = {}){
   if (!AUDIO.enabled) return;
-  if (unavailableAudio.has(key)) return;          // Skip known bad keys
+  if (unavailableAudio.has(initialKey)) return;
 
-  const baseClip = audioBank[key];
-  // Not loaded yet (maybe still buffering) => skip quietly
-  if (!baseClip || baseClip.readyState < 2) return;
+  let key = initialKey;
 
-  // Light spam control for very frequent tick
-  const now = performance.now();
-  if (key === 'bombTick'){
-    if (lastPlayTimePerKey[key] && now - lastPlayTimePerKey[key] < 80) return;
-    lastPlayTimePerKey[key] = now;
+  /* Adaptive degrade: skip / modify based on level */
+  // (Rules intentionally minimal & cheap)
+  if(audioDegradeLevel === 1){
+    // Mild: slightly thin bombTick
+    if(key==='bombTick' && Math.random()<0.5) return;
+  } else if(audioDegradeLevel === 2){
+    // Medium: heavy thinning of bombTick + partial catch suppression
+    if(key==='bombTick' && Math.random()<0.8) return;
+    if(key==='catchTiny' && Math.random()<0.5) return;
+    if(key==='catchBlock') allowOverlap=false;
+  } else if(audioDegradeLevel === 3){
+    // Severe: only keep core impactful sounds
+    const essential=new Set(['miss','bombExplode','bossSpawn','victory','nuke','bossHit','stickyHit','shieldBlock','lifeGain']);
+    if(!essential.has(key)) return;
+    allowOverlap=false;
+    volumeScale*=0.85;
   }
 
-  const baseVol = (AUDIO.volumeMaster ?? 1) * (AUDIO.perClipVolume?.[key] ?? 1);
-  const finalVol = Math.min(1, baseVol * volumeScale);
-
-  // Non‑pooled keys
-  if (!SFX_POOL_KEYS.has(key)){
-    if (allowOverlap){
-      // Clone only if we know it can play
-      try {
-        const clone = baseClip.cloneNode();
-        // If clone has no src or not ready; skip (rare but safe)
-        if (!clone || !clone.play) return;
-        clone.volume = finalVol;
-        clone.currentTime = 0;
-        clone.play().catch(()=>{ /* swallow */ });
-      } catch {
-        /* swallow */
+  /* Lean mode grouping (only when degrade >=2) */
+  if(leanMode && audioDegradeLevel >= 2){
+    for(const group of Object.values(LEAN_GROUPS)){
+      if(group.keys.has(key)){
+        const nowT=performance.now();
+        if(nowT - group.lastPlay < group.minGap) return;
+        key = group.proxy; // unify to a single representative sound
+        group.lastPlay=nowT;
+        break;
       }
-      return;
     }
-    // No overlap path
-    if (!baseClip.paused) return;
-    try {
-      baseClip.volume = finalVol;
-      baseClip.currentTime = 0;
-      baseClip.play().catch(()=>{ /* swallow */ });
-    } catch {}
+  }
+
+  /* WebAudio tiny path (skip when severe degrade to cut mixing entirely) */
+  if(audioDegradeLevel < 3 && WA_KEYS.has(key) && waCtx && waBuffers[key]){
+    try{
+      const src=waCtx.createBufferSource();
+      src.buffer=waBuffers[key];
+      const gain=waCtx.createGain();
+      const baseVol=(AUDIO.volumeMaster ?? 1)*(AUDIO.perClipVolume?.[key] ?? 1)*volumeScale;
+      gain.gain.value=baseVol;
+      src.connect(gain).connect(waCtx.destination);
+      src.start();
+    }catch{}
     return;
   }
 
-  // Pooled keys (to reduce excessive clone creation)
-  if (!sfxPools[key]){
-    sfxPools[key] = { voices:[], idx:0 };
-    for (let i=0;i<POOL_SIZE;i++){
-      try {
-        const v = baseClip.cloneNode();
-        if (!v || !v.play) continue;
-        v.volume = finalVol;
-        sfxPools[key].voices.push(v);
-      } catch {}
+  /* HTMLAudio fallback */
+  const baseClip = audioBank[key];
+  if(!baseClip || baseClip.readyState < 2) return;
+
+  const now=performance.now();
+  if(key==='bombTick'){
+    if(lastPlayTimePerKey[key] && now - lastPlayTimePerKey[key] < 80) return;
+    lastPlayTimePerKey[key]=now;
+  }
+
+  const baseVol=(AUDIO.volumeMaster ?? 1)*(AUDIO.perClipVolume?.[key] ?? 1);
+  const finalVol=Math.min(1, baseVol * volumeScale);
+
+  if(!SFX_POOL_KEYS.has(key)){
+    if(allowOverlap){
+      try{
+        const clone=baseClip.cloneNode();
+        if(!clone || !clone.play) return;
+        clone.volume=finalVol;
+        clone.currentTime=0;
+        clone.play().catch(()=>{});
+      }catch{}
+      return;
     }
-    // If pool creation fails or is empty => mark unavailable to silence further attempts
-    if (sfxPools[key].voices.length === 0){
-      markAudioUnavailable(key, 'pool creation failed');
+    if(!baseClip.paused) return;
+    try{
+      baseClip.volume=finalVol;
+      baseClip.currentTime=0;
+      baseClip.play().catch(()=>{});
+    }catch{}
+    return;
+  }
+
+  if(!sfxPools[key]){
+    sfxPools[key]={ voices:[], idx:0 };
+    for(let i=0;i<POOL_SIZE;i++){
+      try{
+        const v=baseClip.cloneNode();
+        if(!v || !v.play) continue;
+        v.volume=finalVol;
+        sfxPools[key].voices.push(v);
+      }catch{}
+    }
+    if(sfxPools[key].voices.length===0){
+      markAudioUnavailable(key,'pool creation failed');
       return;
     }
   }
 
-  const pool = sfxPools[key];
-  const voice = pool.voices[pool.idx];
-  pool.idx = (pool.idx + 1) % pool.voices.length;
-
-  if (!voice || !voice.play) return;
-  try {
-    voice.volume = finalVol;
-    voice.currentTime = 0;
-    voice.play().catch(()=>{ /* swallow */ });
-  } catch {}
+  const pool=sfxPools[key];
+  const voice=pool.voices[pool.idx];
+  pool.idx=(pool.idx+1)%pool.voices.length;
+  if(!voice || !voice.play) return;
+  try{
+    voice.volume=finalVol;
+    voice.currentTime=0;
+    voice.play().catch(()=>{});
+  }catch{}
 }
 
 /* -------------------- SIZE_TIER Precomputation -------------------- */
@@ -759,8 +832,15 @@ function internalStartCommon(){
   playSfx('uiStart');
   playMusic(infiniteMode ? 'infinite' : 'normal', { immediate:true });
 
+  // Start loading WebAudio buffers (non-blocking)
+  loadWebAudioBuffers();
+
   hudDirty=true;
   frameCounter=0;
+
+  perfWindow.length=0;
+  perfLastSampleTs=0;
+  audioDegradeLevel=0;
 
   maybeShowTutorial(()=>{ rafId=requestAnimationFrame(gameLoop); });
 }
@@ -2004,6 +2084,22 @@ function gameLoop(ts){
   const dt=adjustDtForSlowMo(rawDt);
   const dtMs=(ts - lastTs);
   lastTs=ts;
+
+  /* Performance sampling (Essential) */
+  if(ts - perfLastSampleTs >= PERF_SAMPLE_INTERVAL){
+    perfLastSampleTs=ts;
+    perfWindow.push({ t:ts, ft:dtMs });
+    const cutoff=ts - PERF_WINDOW_MS;
+    while(perfWindow.length && perfWindow[0].t < cutoff) perfWindow.shift();
+    if(perfWindow.length){
+      const avg = perfWindow.reduce((a,b)=>a+b.ft,0)/perfWindow.length;
+      let newLevel=0;
+      if(avg>PERF_THRESHOLDS[0]) newLevel=1;
+      if(avg>PERF_THRESHOLDS[1]) newLevel=2;
+      if(avg>PERF_THRESHOLDS[2]) newLevel=3;
+      audioDegradeLevel = newLevel;
+    }
+  }
 
   ctx.clearRect(0,0,canvas.width,canvas.height);
 

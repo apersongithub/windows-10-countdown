@@ -2751,6 +2751,15 @@ function showStartLivesBanner(){
 }
 
 /* -------------------- End Game (Enhanced) -------------------- */
+// Add near other helpers (anywhere above endGame is fine)
+function freezeGameBeforeRedirect(){
+  try { cancelAnimationFrame(rafId); } catch {}
+  try { unbindGameListeners(); } catch {}
+  gameActive = false;
+  gamePaused = false;
+  nukeTriggered = false;
+}
+
 function endGame(victory = false){
   if (nukeTriggered) return;
 
@@ -2771,12 +2780,13 @@ function endGame(victory = false){
       playSfx('gameOver');
 if (REDIRECT_ON_LOSS){
   playSfx('gameOver');
-  try {
-    sessionStorage.setItem('lossRedirectFlag', '1');        // indicates a loss redirect occurred
-    sessionStorage.setItem('lossRedirectCount', '0');       // reset bounce counter
-  } catch {}
-  window.location.replace(LOSS_REDIRECT_URL);               // replace so history entry is cleaner
-  return;
+      freezeGameBeforeRedirect();
+      try {
+        sessionStorage.setItem('lossRedirectTimestamp', String(Date.now()));
+      } catch {}
+      // Use href (NOT replace) so Back returns here
+      window.location.href = LOSS_REDIRECT_URL;
+      return;
 }
     }
     finalizeInfiniteScreen();
@@ -2797,12 +2807,13 @@ if (REDIRECT_ON_LOSS){
       playSfx('gameOver');
 if (REDIRECT_ON_LOSS){
   playSfx('gameOver');
-  try {
-    sessionStorage.setItem('lossRedirectFlag', '1');        // indicates a loss redirect occurred
-    sessionStorage.setItem('lossRedirectCount', '0');       // reset bounce counter
-  } catch {}
-  window.location.replace(LOSS_REDIRECT_URL);               // replace so history entry is cleaner
-  return;
+      freezeGameBeforeRedirect();
+      try {
+        sessionStorage.setItem('lossRedirectTimestamp', String(Date.now()));
+      } catch {}
+      // Use href (NOT replace) so Back returns here
+      window.location.href = LOSS_REDIRECT_URL;
+      return;
 }
     }
     playSfx('nuke');

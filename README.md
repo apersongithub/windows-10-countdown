@@ -3,7 +3,7 @@
 
 | Countdown | Game |
 | :------------------: | :---------------: |
-| ![image](https://github.com/user-attachments/assets/d858d90a-c353-4179-bbff-3a1f636ce4dc) | ![game](https://github.com/user-attachments/assets/185bc026-7098-44eb-aa13-656afcaf21d5) |
+| ![image](https://github.com/user-attachments/assets/d858d90a-c353-4179-bbff-3a1f636ce4dc) | ![game](https://github.com/user-attachments/assets/9e23fa66-0b40-4e6a-9c14-e2bdc189d282) |
 
 ## **🎮 How to Play**
 

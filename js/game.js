@@ -17,12 +17,6 @@ import { randBetween, roundedRect } from './utils.js';
 import { triggerNuke } from './nuke.js';
 import { MUSIC } from './config.js';
 
-// Stop any loop when page is being hidden (helps prevent stale BFCache resurrection)
-window.addEventListener('pagehide', () => {
-  try { cancelAnimationFrame(rafId); } catch {}
-  gameActive = false;
-});
-
 /* -------------------- Additional Unlock / Redirect Options -------------------- */
 const STICKY_UNLOCK_KEY = 'defendUpdatesStickyUnlocked';
 const STICKY_SCORE_UNLOCK_THRESHOLD = 500;
@@ -2111,11 +2105,6 @@ function drawStickyHazard(b,now){
 /* -------------------- Game Loop -------------------- */
 function gameLoop(ts){
   if(!gameActive || gamePaused || nukeTriggered) return;
-  if (lives <= 0) {
-  // Prevent “playing without lives” if resurrected from BFCache.
-  gameActive = false;
-  return;
-}
   frameCounter++;
   const rawDt=(ts - lastTs)/1000;
   const dt=adjustDtForSlowMo(rawDt);
@@ -2751,15 +2740,6 @@ function showStartLivesBanner(){
 }
 
 /* -------------------- End Game (Enhanced) -------------------- */
-// Add near other helpers (anywhere above endGame is fine)
-function freezeGameBeforeRedirect(){
-  try { cancelAnimationFrame(rafId); } catch {}
-  try { unbindGameListeners(); } catch {}
-  gameActive = false;
-  gamePaused = false;
-  nukeTriggered = false;
-}
-
 function endGame(victory = false){
   if (nukeTriggered) return;
 
@@ -2777,18 +2757,10 @@ function endGame(victory = false){
 
   if (infiniteMode){
     if(!victory && REDIRECT_ON_LOSS && INFINITE_REDIRECT_ON_LOSS){
-      playSfx('gameOver');
-if (REDIRECT_ON_LOSS){
   playSfx('gameOver');
-      freezeGameBeforeRedirect();
-      try {
-        sessionStorage.setItem('lossRedirectTimestamp', String(Date.now()));
-      } catch {}
-      // Use href (NOT replace) so Back returns here
-      window.location.href = LOSS_REDIRECT_URL;
-      return;
+  showLossIframe(LOSS_REDIRECT_URL);
+  return;
 }
-    }
     finalizeInfiniteScreen();
     return;
   }
@@ -2804,18 +2776,10 @@ if (REDIRECT_ON_LOSS){
   const shouldNuke = (!victory) || (victory && REQUIRE_PERFECT_VICTORY && lifeEverLost);
   if (shouldNuke){
     if (REDIRECT_ON_LOSS){
-      playSfx('gameOver');
-if (REDIRECT_ON_LOSS){
   playSfx('gameOver');
-      freezeGameBeforeRedirect();
-      try {
-        sessionStorage.setItem('lossRedirectTimestamp', String(Date.now()));
-      } catch {}
-      // Use href (NOT replace) so Back returns here
-      window.location.href = LOSS_REDIRECT_URL;
-      return;
+  showLossIframe(LOSS_REDIRECT_URL);
+  return;
 }
-    }
     playSfx('nuke');
     triggerNuke(!victory
       ? 'Defenses collapsed.'
@@ -3106,6 +3070,80 @@ function updateBoss(ts){
     spawnBossHazard();
     lastBossDrop=now;
   }
+}
+
+function showLossIframe(url){
+  if (document.getElementById('loss-iframe-container')) return;
+
+  try { cancelAnimationFrame(rafId); } catch {}
+  gameActive = false;
+  gamePaused = false;
+  nukeTriggered = false;
+  try { unbindGameListeners(); } catch {}
+
+  const gOverlay = document.getElementById('game-overlay');
+  if (gOverlay) gOverlay.style.display = 'none';
+  const gHud = document.getElementById('game-hud');
+  if (gHud) gHud.style.display = 'none';
+  const msg = document.getElementById('game-message');
+  if (msg) { msg.classList.remove('show'); msg.textContent=''; }
+
+  const wrap = document.createElement('div');
+  wrap.id = 'loss-iframe-container';
+  wrap.style.cssText = `
+    position:fixed;
+    inset:0;
+    z-index:999999;
+    background:#000;
+    display:flex;
+    flex-direction:column;
+  `;
+
+  const bar = document.createElement('div');
+  bar.style.cssText = `
+    flex:0 0 auto;
+    padding:6px 10px;
+    font:600 12px Segoe UI,Inter,sans-serif;
+    letter-spacing:.5px;
+    background:rgba(0,0,0,0.65);
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    user-select:none;
+  `;
+  bar.innerHTML = `
+    <span style="opacity:.8;">YOU LOST</span>
+    <button id="loss-exit-btn" style="
+      background:rgba(255, 0, 0, 0.69);
+      border:1px solid rgba(255,255,255,0.35);
+      color:#fff;
+      font:600 11px Segoe UI,Inter,sans-serif;
+      padding:4px 10px;
+      border-radius:6px;
+      cursor:pointer;
+      letter-spacing:.6px;
+    ">Try Again</button>
+  `;
+
+  const iframe = document.createElement('iframe');
+  iframe.src = url;
+  iframe.style.cssText = `
+    flex:1 1 auto;
+    width:100%;
+    height:100%;
+    border:0;
+    background:#000;
+  `;
+
+  wrap.appendChild(bar);
+  wrap.appendChild(iframe);
+  document.body.appendChild(wrap);
+
+  // Reload page on close
+  bar.querySelector('#loss-exit-btn').addEventListener('click', () => {
+    location.reload();
+  });
 }
 
 /* -------------------- Export API -------------------- */

@@ -4,31 +4,7 @@ import { runDisintegration, injectFinalStageImmediate } from './disintegration.j
 import { initGame, startGame, startInfiniteGame, showPlayPrompt } from './game.js';
 import { COUNTDOWN_CONFIG, LS_KEYS, PERSIST_UNLOCK_BEFORE_EOL } from './config.js';
 import { dateForWallTimeInZone } from './utils.js';
-/* === Loss Redirect Return Guard ===
-   If we come back (Back button) after a loss redirect, show final stage instead of resuming a dead game.
-*/
-(function setupLossReturnGuard(){
-  function handleLossReturn(){
-    if (sessionStorage.getItem('lossRedirected') === '1'){
-      // Clear the flag so a manual refresh doesn’t keep forcing this
-      try { sessionStorage.removeItem('lossRedirected'); } catch {}
-      // Inject final stage message
-      try { injectFinalStageImmediate(); } catch {}
-      // Stop any lingering loops (in case BFCache revived state)
-      if (window.cancelAnimationFrame && window.rafId) {
-        try { cancelAnimationFrame(window.rafId); } catch {}
-      }
-      // Show play prompt (if the countdown already unlocked)
-      try { showPlayPrompt(); } catch {}
-      // Optionally also mark unlocked if you want to skip countdown gating:
-      // gameUnlocked = true;
-    }
-  }
-  // Run now (normal reload) and also on pageshow (BFCache restore)
-  handleLossReturn();
-  window.addEventListener('pageshow', handleLossReturn);
-})();
-/* -------------------- Nuke Overlay -------------------- */
+
 const playPromptEl = document.getElementById('play-prompt');
 
 let gameUnlocked = false;

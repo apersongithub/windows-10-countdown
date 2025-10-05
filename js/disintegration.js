@@ -1,11 +1,18 @@
-/* Disintegration & final stage sequence */
+/* Disintegration & final stage sequence (optimized / cleaned) */
 import { DISINTEGRATION_CONFIG as C, LS_KEYS } from './config.js';
+
+const MAX_PARTICLES = 8000; // hard safety cap
+let particleCount = 0;
 
 export function runDisintegration() {
   return new Promise(resolve => {
     const container = document.getElementById('disintegrate-target');
     if (!container) { resolve(); return; }
     const layer = document.getElementById('disintegration-layer');
+    if (!layer) { resolve(); return; }
+    clearDisintegrationLayer(layer);
+
+    particleCount = 0;
     createTextParticles(container, layer);
     createQRParticles(layer);
     container.style.visibility='hidden';
@@ -13,32 +20,64 @@ export function runDisintegration() {
   });
 }
 
+function safeAppendParticle(layer, el, lifeMs = 2600) {
+  if (particleCount >= MAX_PARTICLES) {
+    // Drop silently; safety
+    return;
+  }
+  particleCount++;
+  let cleaned = false;
+  const cleanup = ()=>{
+    if (cleaned) return;
+    cleaned = true;
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+    particleCount--;
+  };
+  el.addEventListener('transitionend', cleanup, { once:true });
+  setTimeout(cleanup, lifeMs + 500); // fallback
+  layer.appendChild(el);
+}
+
 function createTextParticles(root, layer){
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(n){ return n.nodeValue.trim()? NodeFilter.FILTER_ACCEPT: NodeFilter.FILTER_REJECT; }
   });
-  const nodes=[];
-  while (walker.nextNode()) nodes.push(walker.currentNode);
-  nodes.forEach(node=>{
+
+  const textNodes=[];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+  const frag = document.createDocumentFragment();
+
+  textNodes.forEach(node=>{
     const txt=node.nodeValue;
     const parent=node.parentElement;
+    if(!parent) return;
     const temp=document.createElement('span');
     parent.insertBefore(temp,node);
     parent.removeChild(node);
+
+    // Build spans into fragment to reduce layout recalcs
+    const innerFrag=document.createDocumentFragment();
     for(let i=0;i<txt.length;i++){
       const ch=txt[i];
       const span=document.createElement('span');
       span.textContent=ch;
       span.style.whiteSpace= ch===' ' ? 'pre':'nowrap';
       span.style.display='inline-block';
-      temp.appendChild(span);
+      innerFrag.appendChild(span);
     }
-    Array.from(temp.childNodes).forEach(s=>{
+    temp.appendChild(innerFrag);
+
+    // Force layout once
+    const letters = Array.from(temp.childNodes);
+    letters.forEach(s=>{
       const b=s.getBoundingClientRect();
       spawnCharParticle(layer,s.textContent,b.left+b.width/2,b.top+b.height/2,getComputedStyle(s).fontSize);
     });
     temp.remove();
   });
+
+  root.appendChild(frag);
 }
 
 function spawnCharParticle(layer,char,px,py,fontSize){
@@ -53,7 +92,7 @@ function spawnCharParticle(layer,char,px,py,fontSize){
   const dur=C.durationCharMin+Math.random()*(C.durationCharMax-C.durationCharMin);
   const rot=(Math.random()*720-360);
   p.style.transition=`transform ${dur}ms ${C.easing}, opacity ${dur}ms linear`;
-  layer.appendChild(p);
+  safeAppendParticle(layer,p,dur);
   requestAnimationFrame(()=>{
     p.style.transform=`translate(${distX}px,${distY}px) rotate(${rot}deg) scale(${0.4+Math.random()*0.4})`;
     p.style.opacity='0';
@@ -72,7 +111,7 @@ function spawnDot(layer,px,py){
   const distY=-(Math.random()*C.rise*1.1);
   const dDur=700+Math.random()*900;
   dot.style.transition=`transform ${dDur}ms ${C.easing}, opacity ${dDur}ms linear`;
-  layer.appendChild(dot);
+  safeAppendParticle(layer,dot,dDur);
   requestAnimationFrame(()=>{
     dot.style.transform=`translate(${distX}px,${distY}px) scale(${0.3+Math.random()*0.6})`;
     dot.style.opacity='0';
@@ -91,6 +130,7 @@ function createQRParticles(layer){
       const px=r.left+(x/(cols-1))*r.width;
       const py=r.top +(y/(rows-1))*r.height;
       spawnDot(layer,px,py);
+      if (particleCount >= MAX_PARTICLES) return;
     }
   }
 }
@@ -102,22 +142,22 @@ function showQuestionStage(resolve){
   document.body.appendChild(stage);
   setTimeout(()=>{
     const q=document.getElementById('qStage');
-    q.classList.add('fade-out');
-    setTimeout(()=>{
-      q.remove();
-      const p=document.createElement('p');
-      p.textContent=C.finalMessage;
-      stage.appendChild(p);
-      // Persist unlock
-      try { localStorage.setItem(LS_KEYS.postStage,'1'); } catch(e){}
+    if(q){
+      q.classList.add('fade-out');
+      setTimeout(()=>{
+        q.remove();
+        const p=document.createElement('p');
+        p.textContent=C.finalMessage;
+        stage.appendChild(p);
+        try { localStorage.setItem(LS_KEYS.postStage,'1'); } catch(e){}
+        resolve();
+      },620);
+    } else {
       resolve();
-    },620);
+    }
   }, C.questionHoldMs);
 }
 
-/**
- * Inject final stage immediately (used when skipping animation on revisit)
- */
 export function injectFinalStageImmediate() {
   if (document.querySelector('.final-stage')) return;
   const stage=document.createElement('div');
@@ -126,4 +166,10 @@ export function injectFinalStageImmediate() {
   stage.style.opacity='1';
   stage.innerHTML = `<p style="font-size:clamp(1rem,1.9vw,2rem); letter-spacing:.5px;">${C.finalMessage}</p>`;
   document.body.appendChild(stage);
+}
+
+export function clearDisintegrationLayer(layer = document.getElementById('disintegration-layer')) {
+  if(!layer) return;
+  while(layer.firstChild) layer.removeChild(layer.firstChild);
+  particleCount = 0;
 }

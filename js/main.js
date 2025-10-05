@@ -90,8 +90,11 @@ window.addEventListener('nuke:close', () => {
 /* Minimal Insert bypass:
    Press Insert -> mark postStage as done -> reload (countdown skipped on next load)
 */
+/* ===== Minimal Insert Skip (kept, but harmonized with LS_KEYS.postStage) ===== */
 (function () {
-  const KEY = 'defendUpdatesPostStage';
+  // Prefer configured key if available
+  const CONFIG_KEY = (typeof LS_KEYS !== 'undefined' && LS_KEYS.postStage) ? LS_KEYS.postStage : 'defendUpdatesPostStage';
+  const KEY = CONFIG_KEY;
 
   function skipCountdownAndReload() {
     try {
@@ -99,70 +102,87 @@ window.addEventListener('nuke:close', () => {
     } catch (e) {
       console.warn('[InsertBypassMinimal] Could not write localStorage', e);
     }
-    location.reload();
+    // Use replace + cache buster to minimize stale state
+    const base = location.origin + location.pathname;
+    location.replace(base + '?skip=' + Date.now());
   }
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Insert' || e.code === 'Insert' || e.key === 'Ins') {
+      // Let the more advanced patch (below) handle if it already hijacked (guard with flag)
+      if (window.__advancedBypassActive) return;
       e.preventDefault();
       skipCountdownAndReload();
     }
   });
 
-  // Optional: expose manually in console
   window._forceSkipCountdown = skipCountdownAndReload;
 })();
 
-/* ==== INSERT (skip) + DELETE (reset data) HOTKEY PATCH ====
-   - Insert: bypass countdown and start game immediately (boss mode by default)
-   - Delete: clear stored game data (selective) then reload to normal countdown
-   - No extra buttons / minimal CSS
+/* ==== INSERT (skip) + DELETE (reset data) HOTKEY PATCH (SAFE) ====
+   - Insert: bypass countdown & start game immediately (no reload needed here)
+   - Delete: clear game data THEN reload with cache-busting param
+   - Minimal intrusion: does NOT touch other countdown code unless keys pressed
 */
-
 (function(){
-  const ENABLE_INSERT_BYPASS = true;  // set false to disable Insert hotkey
-  const ENABLE_DELETE_RESET  = true;  // set false to disable Delete reset
-  const SHOW_HINT            = true;  // set false to hide on‑screen hint
-  const USE_SELECTIVE_CLEAR  = true;  // false => full localStorage.clear()
+  const ENABLE_INSERT_BYPASS = true;
+  const ENABLE_DELETE_RESET  = true;
+  const SHOW_HINT            = true;
+  const USE_SELECTIVE_CLEAR  = true;   // false => full localStorage.clear()
+  const CLEAR_PREFIX         = '';     // Optional: e.g. 'defendUpdates' to limit cleared keys
 
-  // Known keys (adjust if you renamed them)
-  const LS_KEYS_TO_CLEAR = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    LS_KEYS_TO_CLEAR.push(localStorage.key(i));
+  // Mark so the minimal handler knows not to double-fire
+  window.__advancedBypassActive = true;
+
+  // Consistent post stage key
+  const POST_STAGE_KEY = (typeof LS_KEYS !== 'undefined' && LS_KEYS.postStage) ? LS_KEYS.postStage : 'defendUpdatesPostStage';
+
+  function liveKeysToClear() {
+    if (!USE_SELECTIVE_CLEAR) return []; // we'll full-clear
+    const list = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (CLEAR_PREFIX && !k.startsWith(CLEAR_PREFIX) && k !== POST_STAGE_KEY) continue;
+      list.push(k);
+    }
+    // Ensure post stage key always included
+    if (!list.includes(POST_STAGE_KEY)) list.push(POST_STAGE_KEY);
+    return list;
   }
-
-  let bypassed = false;
 
   function selectiveClear() {
     if (!USE_SELECTIVE_CLEAR) {
       try { localStorage.clear(); } catch {}
       return;
     }
-    LS_KEYS_TO_CLEAR.forEach(k => {
+    const keys = liveKeysToClear();
+    keys.forEach(k => {
       try { localStorage.removeItem(k); } catch {}
     });
   }
 
   function hideCountdownUI() {
-    // Attempt to hide common countdown elements; adjust selectors as needed
-    const cdEls = document.querySelectorAll(
-      '[data-countdown], .countdown-overlay, #countdown, #win10-countdown'
-    );
+    const cdEls = document.querySelectorAll('[data-countdown], .countdown-overlay, #countdown, #win10-countdown');
     cdEls.forEach(el => el.style.display='none');
   }
 
+  let bypassed = false;
   function bypassCountdownAndStart(mode='boss'){
     if (bypassed) return;
     bypassed = true;
+
+    // Set post-stage flag so the main flow treats countdown as finished
+    try { localStorage.setItem(POST_STAGE_KEY, '1'); } catch {}
 
     if (typeof cancelCountdown === 'function') {
       try { cancelCountdown(); } catch {}
     } else {
       hideCountdownUI();
     }
-
     hideCountdownUI();
 
+    // Call main game starters (from already-imported context)
     if (mode === 'infinite' && typeof startInfiniteGame === 'function') {
       startInfiniteGame();
     } else if (typeof startGame === 'function') {
@@ -172,33 +192,44 @@ window.addEventListener('nuke:close', () => {
     }
   }
 
-  function resetDataAndReload() {
-    if (!confirm('Reset all saved game data and countdown?')) return;
+  async function resetDataAndReload() {
+    if (!confirm('Reset ALL saved game data and restart countdown?')) return;
+
     selectiveClear();
-    location.reload();
+
+    // Force-remove post stage key again in case of repopulation
+    try { localStorage.removeItem(POST_STAGE_KEY); } catch {}
+
+    // Two animation frames to allow any pending synchronous listeners to finish
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
+
+    const base = location.origin + location.pathname;
+    location.replace(base + '?reset=' + Date.now());
   }
 
-  // Hotkeys
   window.addEventListener('keydown', (e) => {
-    // Avoid triggering while typing in inputs
     if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
 
-    if (ENABLE_INSERT_BYPASS && (e.key === 'Insert' || e.code === 'Insert' || e.key === 'Ins')) {
+    const isInsert = (e.key === 'Insert' || e.code === 'Insert' || e.key === 'Ins');
+    const isDelete = (e.key === 'Delete' || e.code === 'Delete');
+
+    if (ENABLE_INSERT_BYPASS && isInsert) {
       e.preventDefault();
-      bypassCountdownAndStart('boss'); // change to 'infinite' if you prefer
+      // Use in-page bypass (no reload) so we don't risk breaking the countdown pipe
+      bypassCountdownAndStart('boss');
     }
-    if (ENABLE_DELETE_RESET && (e.key === 'Delete' || e.code === 'Delete')) {
+
+    if (ENABLE_DELETE_RESET && isDelete) {
       e.preventDefault();
       resetDataAndReload();
     }
-  });
+  }, { capture: true });
 
-  // Minimal on‑screen hint
   function addHint() {
     if (!SHOW_HINT) return;
     const ID = 'countdown-hotkey-hint';
     if (document.getElementById(ID)) return;
-
     const div = document.createElement('div');
     div.id = ID;
     div.textContent = 'Insert: Skip countdown  •  Delete: Reset data';
@@ -223,8 +254,6 @@ window.addEventListener('nuke:close', () => {
       line-height:1.25;
     `;
     document.body.appendChild(div);
-
-    // Fade out after some time (optional)
     setTimeout(()=>{ div.style.transition='opacity .7s'; div.style.opacity='0'; }, 3000);
     setTimeout(()=>{ if(div.parentNode) div.remove(); }, 16000);
   }
@@ -235,7 +264,7 @@ window.addEventListener('nuke:close', () => {
     addHint();
   }
 
-  // Expose for console
+  // Console helpers
   window._skipCountdownNow = () => bypassCountdownAndStart('boss');
   window._resetGameData    = resetDataAndReload;
 })();

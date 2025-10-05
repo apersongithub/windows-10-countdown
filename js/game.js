@@ -1,15 +1,7 @@
 /* ============================================================================
-   Defender Game - Full game.js
-   Features:
-   - Normal blocks, Life, Bomb, Snip, Shield, Task Manager
-   - Soundwave power-up (flawless unlock)
-   - Sticky Keys hazard (infinite or alternate score unlock)
-   - Sticky Keys alternative unlock at score >= 500 IF player has NOT unlocked Soundwave (i.e. no flawless victory yet)
-   - Sticky Keys lock animation with optional locked/unlocked images (falls back to vector)
-   - Option to disable redirect specifically for Infinite Mode losses (INFINITE_REDIRECT_ON_LOSS)
-   - SNIP collects power-ups and removes hazards (bomb triggers explosion, sticky removed silently)
-   - Flawless tracking via lifeEverLost
-   - Slow‑mo stacking (Task Manager + Soundwave)
+   Defender Game - game.js
+   Optimized + Victory UI Parity + Sticky Keys Enhanced Panel + Infinite Parity
+   + Mobile (Touch) Snipping Tool Support
    ============================================================================ */
 
 import {
@@ -22,13 +14,11 @@ import {
 } from './config.js';
 import { randBetween, roundedRect } from './utils.js';
 import { triggerNuke } from './nuke.js';
+import { MUSIC } from './config.js';
 
 /* -------------------- Additional Unlock / Redirect Options -------------------- */
-/* LocalStorage key for independent Sticky Keys unlock (separate from infinite) */
 const STICKY_UNLOCK_KEY = 'defendUpdatesStickyUnlocked';
-/* Score threshold for alternate Sticky Keys unlock (if no flawless yet) */
 const STICKY_SCORE_UNLOCK_THRESHOLD = 500;
-/* Infinite mode specific redirect toggle (set to true to redirect on loss in infinite mode) */
 const INFINITE_REDIRECT_ON_LOSS = false;
 
 /* -------------------- Core Constants -------------------- */
@@ -90,11 +80,10 @@ let paddleX=0;
 let canvas, ctx, hudEl, overlayEl, msgEl;
 let rafId=null;
 let lastTs=0;
-
-// Near the top with other runtime / state declarations
-let lastBossHazardSfx = 0;
+let frameCounter=0;
 
 /* Boss */
+let lastBossHazardSfx = 0;
 let bossActive=false;
 let bossHealth=BOSS_CONFIG.health;
 let bossDropInterval=BOSS_CONFIG.dropIntervalStart;
@@ -103,7 +92,6 @@ let bossStartTime=0;
 let bossDying=false;
 let bossDeathStart=0;
 let bossDeathParticles=[];
-
 
 let stickyJustUnlocked = false;
 let soundwaveJustUnlocked = false;
@@ -130,209 +118,213 @@ let shieldImg=null, shieldImgReady=false;
 let taskMgrImg=null, taskMgrImgReady=false;
 let soundwaveImg=null, soundwaveImgReady=false;
 let stickyImg=null, stickyImgReady=false;
-/* Sticky lock images */
 let stickyLockImgClosed=null, stickyLockImgClosedReady=false;
 let stickyLockImgOpen=null, stickyLockImgOpenReady=false;
 
 /* Audio */
 const audioBank={}; let audioLoaded=false;
 
-/* ---- Music System ---- */
-import { MUSIC } from './config.js';  // (If not already imported)
-
-const musicBank = {};         // key -> HTMLAudioElement
+/* Music System */
+const musicBank = {};
 let currentMusicKey = null;
 let currentMusicNode = null;
 let fadingOutNode = null;
 let musicTransitioning = false;
 let pauseDuckActive = false;
-let pauseDuckStart = 0;
 
-function loadMusicBank(){
-  if(!MUSIC?.enabled) return;
-  for(const [key, src] of Object.entries(MUSIC.tracks)){
-    if(!src) continue;
-    const a = new Audio(src);
-    a.preload = 'auto';
-    a.loop = true;
-    a.volume = 0; // start silent until played
-    musicBank[key] = a;
-  }
-}
-
-function stopAllMusicImmediate(){
-  for(const node of Object.values(musicBank)){
-    try { node.pause(); node.currentTime = 0; } catch {}
-  }
-  currentMusicKey = null;
-  currentMusicNode = null;
-  fadingOutNode = null;
-  musicTransitioning = false;
-}
-
-function playMusic(key, {immediate=false, force=false} = {}){
-  if(!MUSIC.enabled) return;
-  if(!musicBank[key]) return;
-  if(!force && key === currentMusicKey) return;
-
-  const newNode = musicBank[key];
-  const oldNode = currentMusicNode;
-
-  // Prepare new node
-  try { newNode.currentTime = 0; } catch {}
-  if(immediate){
-    if(oldNode && oldNode !== newNode){
-      oldNode.pause();
-    }
-    newNode.volume = MUSIC.volumeMaster;
-    newNode.play().catch(()=>{});
-    currentMusicNode = newNode;
-    currentMusicKey = key;
-    return;
-  }
-
-  // Crossfade logic
-  musicTransitioning = true;
-  const crossfadeMs = MUSIC.crossfadeMs || 1200;
-  const startTime = performance.now();
-  const targetVol = MUSIC.volumeMaster;
-
-  // Start new at 0 and play
-  newNode.volume = 0;
-  newNode.play().catch(()=>{});
-  currentMusicNode = newNode;
-  currentMusicKey = key;
-
-  fadingOutNode = oldNode && oldNode !== newNode ? oldNode : null;
-
-  function step(){
-    const now = performance.now();
-    const t = Math.min(1, (now - startTime) / crossfadeMs);
-    const eased = t*t*(3 - 2*t); // smoothstep
-    if(newNode){
-      newNode.volume = targetVol * eased;
-    }
-    if(fadingOutNode){
-      const outVol = targetVol * (1 - eased);
-      fadingOutNode.volume = outVol;
-      if(t >= 1){
-        try { fadingOutNode.pause(); } catch {}
-      }
-    }
-    if(t < 1){
-      requestAnimationFrame(step);
-    } else {
-      fadingOutNode = null;
-      musicTransitioning = false;
-    }
-  }
-  requestAnimationFrame(step);
-}
-
-function fadeOutAndStopMusic(durationMs = MUSIC.fadeOutMs || 800){
-  if(!currentMusicNode) return;
-  const node = currentMusicNode;
-  const startVol = node.volume;
-  const start = performance.now();
-  function step(){
-    const now = performance.now();
-    const t = Math.min(1, (now - start)/durationMs);
-    const eased = t; // linear fade out
-    node.volume = startVol * (1 - eased);
-    if(t < 1){
-      requestAnimationFrame(step);
-    } else {
-      try { node.pause(); } catch {}
-      if(node === currentMusicNode){
-        currentMusicNode = null;
-        currentMusicKey = null;
-      }
-    }
-  }
-  requestAnimationFrame(step);
-}
-
-function applyPauseDuck(){
-  if(!MUSIC.enabled || !currentMusicNode || pauseDuckActive) return;
-  pauseDuckActive = true;
-  const node = currentMusicNode;
-  const startVol = node.volume;
-  const target = MUSIC.volumeMaster * (MUSIC.pauseDuckFactor ?? 0.4);
-  const dur = 220;
-  const start = performance.now();
-  function step(){
-    const now = performance.now();
-    const t = Math.min(1, (now - start)/dur);
-    node.volume = startVol + (target - startVol)*t;
-    if(t < 1) requestAnimationFrame(step);
-  }
-  requestAnimationFrame(step);
-}
-
-function removePauseDuck(){
-  if(!pauseDuckActive || !currentMusicNode) return;
-  pauseDuckActive = false;
-  const node = currentMusicNode;
-  const startVol = node.volume;
-  const target = MUSIC.volumeMaster;
-  const dur = MUSIC.resumeFadeMs || 400;
-  const start = performance.now();
-  function step(){
-    const now = performance.now();
-    const t = Math.min(1, (now - start)/dur);
-    node.volume = startVol + (target - startVol)*t;
-    if(t < 1) requestAnimationFrame(step);
-  }
-  requestAnimationFrame(step);
-}
-/* Bomb timing */
+/* Timers / Spawn states */
 let lastBombSpawn=0, nextBombSpawnDelay=0;
-
-/* SNIP */
 let lastSnipSpawn=0, nextSnipSpawnDelay=0;
 let snipReady=false, snipAimStart=0;
 let snipDragging=false, snipDragStarted=false;
 let snipRect=null, snipDragOrigin=null;
 let snipExecuted=false;
 
-/* Shield */
 let lastShieldSpawn=0, nextShieldSpawnDelay=0;
 let shieldActive=false, shieldEndTime=0;
 
-/* Task Manager */
 let lastTaskMgrSpawn=0, nextTaskMgrSpawnDelay=0;
 let slowMoActive=false, slowMoEnd=0;
 let slowMoFactor=1;
 
-/* Soundwave */
 let soundwaveUnlocked = localStorage.getItem(SOUNDWAVE_UNLOCK_KEY)==='1';
 let lastSoundwaveSpawn=0, nextSoundwaveSpawnDelay=0;
 let activeSoundwaveSlowMo=false, activeSoundwaveSlowMoEnd=0;
 
-/* Sticky Keys:
-   Independently unlocked by:
-   - Infinite unlock (boss victory)
-   - Alternate score threshold (if score >= STICKY_SCORE_UNLOCK_THRESHOLD AND no flawless achieved yet)
-*/
 let stickyUnlocked = (localStorage.getItem(STICKY_UNLOCK_KEY)==='1') || infiniteUnlocked;
 let lastStickySpawn=0, nextStickySpawnDelay=0;
 let stickyKeysActive=false, stickyKeysEnd=0;
 let stickyLockX = null;
-
-/* Sticky Keys lock animation state */
 let stickyLockAnim = null;
-/*
-  {
-    phase: 'enter' | 'idle' | 'pulse' | 'exit',
-    start: number,
-    pulseUntil?: number,
-    lockX: number,
-    lockY: number
-  }
-*/
 
-/* Flawless tracking */
 let lifeEverLost=false;
+
+/* Performance flags */
+let listenersBound=false;
+let hudDirty=true;
+
+/* Mobile snip helper state */
+let snipMultiTouch = false;
+let snipLastTapTime = 0;
+const SNIP_MIN_TOUCH_SIZE = 18;
+const SNIP_DOUBLE_TAP_MS = 300;
+
+/* -------------------- HUD Helpers -------------------- */
+function markHudDirty(){ hudDirty=true; }
+
+/* -------------------- Listener Bind / Unbind -------------------- */
+function bindGameListeners(){
+  if(listenersBound) return;
+  window.addEventListener('resize',resizeCanvas);
+  window.addEventListener('mousemove',onMouseMove);
+  window.addEventListener('touchmove',onTouchMove,{passive:false});
+  window.addEventListener('keydown',onGameKey);
+  window.addEventListener('mousedown',onPointerDown);
+  window.addEventListener('mouseup',onPointerUp);
+  window.addEventListener('mousemove',onPointerMove);
+  window.addEventListener('touchstart',onTouchStart,{passive:false});
+  window.addEventListener('touchend',onTouchEnd,{passive:false});
+  window.addEventListener('touchmove',onTouchDrag,{passive:false});
+  listenersBound=true;
+}
+function unbindGameListeners(){
+  if(!listenersBound) return;
+  window.removeEventListener('resize',resizeCanvas);
+  window.removeEventListener('mousemove',onMouseMove);
+  window.removeEventListener('touchmove',onTouchMove);
+  window.removeEventListener('keydown',onGameKey);
+  window.removeEventListener('mousedown',onPointerDown);
+  window.removeEventListener('mouseup',onPointerUp);
+  window.removeEventListener('mousemove',onPointerMove);
+  window.removeEventListener('touchstart',onTouchStart);
+  window.removeEventListener('touchend',onTouchEnd);
+  window.removeEventListener('touchmove',onTouchDrag);
+  listenersBound=false;
+}
+
+/* -------------------- Music -------------------- */
+function loadMusicBank(){
+  if(!MUSIC?.enabled) return;
+  for(const [key, src] of Object.entries(MUSIC.tracks)){
+    if(!src) continue;
+    const a = new Audio(src);
+    a.preload='auto';
+    a.loop=true;
+    a.volume=0;
+    musicBank[key]=a;
+  }
+}
+function playMusic(key,{immediate=false, force=false}={}){
+  if(!MUSIC.enabled) return;
+  if(!musicBank[key]) return;
+  if(!force && key===currentMusicKey) return;
+  const newNode=musicBank[key];
+  const oldNode=currentMusicNode;
+  try{ newNode.currentTime=0; }catch{}
+  if(immediate){
+    if(oldNode && oldNode!==newNode) oldNode.pause();
+    newNode.volume=MUSIC.volumeMaster;
+    newNode.play().catch(()=>{});
+    currentMusicNode=newNode;
+    currentMusicKey=key;
+    return;
+  }
+  musicTransitioning=true;
+  const crossfadeMs=MUSIC.crossfadeMs||1200;
+  const startTime=performance.now();
+  const targetVol=MUSIC.volumeMaster;
+  newNode.volume=0;
+  newNode.play().catch(()=>{});
+  currentMusicNode=newNode;
+  currentMusicKey=key;
+  fadingOutNode=oldNode && oldNode!==newNode ? oldNode:null;
+  function step(){
+    const now=performance.now();
+    const t=Math.min(1,(now - startTime)/crossfadeMs);
+    const eased=t*t*(3-2*t);
+    newNode.volume=targetVol*eased;
+    if(fadingOutNode){
+      fadingOutNode.volume=targetVol*(1 - eased);
+      if(t>=1){
+        try{fadingOutNode.pause();}catch{}
+      }
+    }
+    if(t<1) requestAnimationFrame(step);
+    else {
+      fadingOutNode=null;
+      musicTransitioning=false;
+    }
+  }
+  requestAnimationFrame(step);
+}
+function fadeOutAndStopMusic(durationMs = MUSIC.fadeOutMs || 800){
+  if(!currentMusicNode) return;
+  const node=currentMusicNode;
+  const startVol=node.volume;
+  const start=performance.now();
+  function step(){
+    const now=performance.now();
+    const t=Math.min(1,(now - start)/durationMs);
+    node.volume=startVol*(1 - t);
+    if(t<1) requestAnimationFrame(step);
+    else {
+      try{node.pause();}catch{}
+      if(node===currentMusicNode){
+        currentMusicNode=null;
+        currentMusicKey=null;
+      }
+    }
+  }
+  requestAnimationFrame(step);
+}
+function applyPauseDuck(){
+  if(!MUSIC.enabled||!currentMusicNode||pauseDuckActive) return;
+  pauseDuckActive=true;
+  const node=currentMusicNode;
+  const startVol=node.volume;
+  const target=MUSIC.volumeMaster*(MUSIC.pauseDuckFactor??0.4);
+  const dur=220; const start=performance.now();
+  function step(){
+    const now=performance.now();
+    const t=Math.min(1,(now - start)/dur);
+    node.volume=startVol + (target - startVol)*t;
+    if(t<1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+function removePauseDuck(){
+  if(!pauseDuckActive||!currentMusicNode) return;
+  pauseDuckActive=false;
+  const node=currentMusicNode;
+  const startVol=node.volume;
+  const target=MUSIC.volumeMaster;
+  const dur=MUSIC.resumeFadeMs||400;
+  const start=performance.now();
+  function step(){
+    const now=performance.now();
+    const t=Math.min(1,(now - start)/dur);
+    node.volume=startVol + (target - startVol)*t;
+    if(t<1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+/* -------------------- Slow Motion -------------------- */
+function adjustDtForSlowMo(rawDt){
+  let factor=1;
+  if(slowMoActive){
+    if(performance.now()>slowMoEnd){
+      slowMoActive=false;
+      slowMoFactor=1;
+    } else factor*=slowMoFactor;
+  }
+  if(activeSoundwaveSlowMo){
+    if(performance.now()>activeSoundwaveSlowMoEnd){
+      activeSoundwaveSlowMo=false;
+    } else factor*=SOUNDWAVE_POWERUP.slowMoFactor;
+  }
+  return rawDt*factor;
+}
 
 /* -------------------- Asset Loading -------------------- */
 function loadBossLogo(){ if(bossLogoImg||bossLogoReady) return;
@@ -402,7 +394,7 @@ function loadAllImages(){
   loadStickyLockImages();
 }
 
-/* Audio */
+/* -------------------- Audio (with pooling) -------------------- */
 function loadAudioBank(){
   if(audioLoaded || !AUDIO.enabled) return;
   for(const [key,path] of Object.entries(AUDIO.files)){
@@ -414,31 +406,68 @@ function loadAudioBank(){
   }
   audioLoaded=true;
 }
+
+const SFX_POOL_KEYS = new Set(['bombTick','bombSpawn','catchTiny','catchBlock']);
+const sfxPools = {};
+const POOL_SIZE = 4;
+let lastPlayTimePerKey = Object.create(null);
+
 function playSfx(key,{allowOverlap=true, volumeScale=1} = {}){
   if(!AUDIO.enabled) return;
-  const clip=audioBank[key]; if(!clip) return;
+  const baseClip=audioBank[key];
+  if(!baseClip) return;
 
-  const baseVol = (AUDIO.volumeMaster ?? 1) * (AUDIO.perClipVolume?.[key] ?? 1);
-  const finalVol = Math.min(1, baseVol * volumeScale);
+  const now=performance.now();
+  if(key==='bombTick'){
+    if(lastPlayTimePerKey[key] && now - lastPlayTimePerKey[key] < 80) return;
+    lastPlayTimePerKey[key]=now;
+  }
 
-  // If overlap requested, clone so we don’t fight current playback
-  if(allowOverlap){
-    const clone = clip.cloneNode();
-    clone.volume = finalVol;
-    try { clone.currentTime = 0; clone.play(); } catch {}
+  const baseVol=(AUDIO.volumeMaster ?? 1)*(AUDIO.perClipVolume?.[key] ?? 1);
+  const finalVol=Math.min(1, baseVol * volumeScale);
+
+  if(!SFX_POOL_KEYS.has(key)){
+    if(allowOverlap){
+      const clone=baseClip.cloneNode();
+      clone.volume=finalVol;
+      try{ clone.currentTime=0; clone.play(); }catch{}
+      return;
+    }
+    if(!baseClip.paused) return;
+    baseClip.volume=finalVol;
+    try{ baseClip.currentTime=0; baseClip.play(); }catch{}
     return;
   }
 
-  // Non-overlapping path
-  if(!clip.paused) return;
-  const originalVol = clip.volume;
-  clip.volume = finalVol;
-  try {
-    clip.currentTime = 0;
-    clip.play().catch(()=>{});
-  } catch {}
-  // Restore volume after it ends
-  clip.onended = () => { clip.volume = originalVol; clip.onended = null; };
+  if(!sfxPools[key]){
+    sfxPools[key]={ voices:[], idx:0 };
+    for(let i=0;i<POOL_SIZE;i++){
+      const v=baseClip.cloneNode();
+      v.volume=finalVol;
+      sfxPools[key].voices.push(v);
+    }
+  }
+  const pool=sfxPools[key];
+  const voice=pool.voices[pool.idx];
+  pool.idx=(pool.idx+1)%pool.voices.length;
+  voice.volume=finalVol;
+  try{
+    voice.currentTime=0;
+    voice.play();
+  }catch{}
+}
+
+/* -------------------- SIZE_TIER Precomputation -------------------- */
+let sizeTierCache=null;
+function precomputeSizeTierWidths(){
+  if(!ctx) return;
+  sizeTierCache = SIZE_TIERS.map(t=>{
+    ctx.save();
+    ctx.font=BLOCK_STYLE.textFont;
+    const w=Math.max(54, Math.ceil(ctx.measureText(t.label).width + 14*2));
+    ctx.restore();
+    return { ...t, width:w, height:36 };
+  });
 }
 
 /* -------------------- Text / Normal Blocks -------------------- */
@@ -599,16 +628,7 @@ function internalStartCommon(){
   msgEl=document.getElementById('game-message');
 
   resizeCanvas();
-  window.addEventListener('resize',resizeCanvas);
-  window.addEventListener('mousemove',onMouseMove);
-  window.addEventListener('touchmove',onTouchMove,{passive:false});
-  window.addEventListener('keydown',onGameKey);
-  window.addEventListener('mousedown',onPointerDown);
-  window.addEventListener('mouseup',onPointerUp);
-  window.addEventListener('mousemove',onPointerMove);
-  window.addEventListener('touchstart',onTouchStart,{passive:false});
-  window.addEventListener('touchend',onTouchEnd);
-  window.addEventListener('touchmove',onTouchDrag,{passive:false});
+  bindGameListeners();
 
   hidePlayPrompt();
   overlayEl.style.display='block';
@@ -629,12 +649,13 @@ function internalStartCommon(){
   shakeStart=0;
   catchParticles=[]; floatTexts=[]; ringPulses=[]; powerupVanishFX=[];
 
-  lastBombSpawn=performance.now(); nextBombSpawnDelay=BOMB_CONFIG.spawnIntervalInitial;
-  lastSnipSpawn=performance.now(); nextSnipSpawnDelay=SNIP_POWERUP.spawnIntervalInitial;
-  lastShieldSpawn=performance.now(); nextShieldSpawnDelay=SHIELD_POWERUP.spawnIntervalInitial;
-  lastTaskMgrSpawn=performance.now(); nextTaskMgrSpawnDelay=TASKMGR_POWERUP.spawnIntervalInitial;
-  lastSoundwaveSpawn=performance.now(); nextSoundwaveSpawnDelay=SOUNDWAVE_POWERUP.spawnIntervalInitial;
-  lastStickySpawn=performance.now(); nextStickySpawnDelay=STICKY_KEYS.spawnIntervalInitial;
+  const now=performance.now();
+  lastBombSpawn=now; nextBombSpawnDelay=BOMB_CONFIG.spawnIntervalInitial;
+  lastSnipSpawn=now; nextSnipSpawnDelay=SNIP_POWERUP.spawnIntervalInitial;
+  lastShieldSpawn=now; nextShieldSpawnDelay=SHIELD_POWERUP.spawnIntervalInitial;
+  lastTaskMgrSpawn=now; nextTaskMgrSpawnDelay=TASKMGR_POWERUP.spawnIntervalInitial;
+  lastSoundwaveSpawn=now; nextSoundwaveSpawnDelay=SOUNDWAVE_POWERUP.spawnIntervalInitial;
+  lastStickySpawn=now; nextStickySpawnDelay=STICKY_KEYS.spawnIntervalInitial;
 
   resetSnipState();
   shieldActive=false;
@@ -642,10 +663,9 @@ function internalStartCommon(){
   activeSoundwaveSlowMo=false;
   stickyKeysActive=false; stickyLockX=null;
   stickyLockAnim=null;
-  stickyJustUnlocked = false;
-soundwaveJustUnlocked = false;
+  stickyJustUnlocked=false;
+  soundwaveJustUnlocked=false;
 
-  /* Reload persistent unlock states (in case changed elsewhere) */
   infiniteUnlocked = localStorage.getItem(INFINITE_UNLOCK_KEY)==='1';
   soundwaveUnlocked = localStorage.getItem(SOUNDWAVE_UNLOCK_KEY)==='1';
   stickyUnlocked = (localStorage.getItem(STICKY_UNLOCK_KEY)==='1') || infiniteUnlocked;
@@ -665,19 +685,18 @@ soundwaveJustUnlocked = false;
   loadAudioBank();
   loadAllImages();
   loadMusicBank();
-  playSfx('uiStart');
+  if(!sizeTierCache) precomputeSizeTierWidths();
 
-  if(infiniteMode){
-  playMusic('infinite', { immediate:true });
-} else {
-  playMusic('normal', { immediate:true });
-}
+  playSfx('uiStart');
+  playMusic(infiniteMode ? 'infinite' : 'normal', { immediate:true });
+
+  hudDirty=true;
+  frameCounter=0;
 
   maybeShowTutorial(()=>{ rafId=requestAnimationFrame(gameLoop); });
 }
 export function startGame(){ infiniteMode=false; internalStartCommon(); }
 export function startInfiniteGame(){ infiniteMode=true; internalStartCommon(); }
-
 
 /* -------------------- Tutorial -------------------- */
 function maybeShowTutorial(cb){
@@ -700,11 +719,11 @@ function maybeShowTutorial(cb){
         <li>Catch normal blocks; miss = lose life.</li>
         <li>Cortana: adds lives (max ${LIFE_BLOCK.maxLives}).</li>
         <li>Errors: Does damage.</li>
-        <li>Snipping Tool: collect then drag an area (collects power-ups).</li>
+        <li>Snipping Tool: collect then drag an area (desktop) or 1/2 finger drag on touch.</li>
         <li>Shield: temporary immunity.</li>
         <li>Task Manager: rare clear + slow-mo.</li>
         <li>Soundwave: flawless unlock (pulses clear area).</li>
-        <li>Sticky Keys: infinite OR score ${STICKY_SCORE_UNLOCK_THRESHOLD}+ (no flawless yet) unlocks hazard.</li>
+        <li>Sticky Keys: infinite OR score ${STICKY_SCORE_UNLOCK_THRESHOLD}+ (no flawless yet).</li>
         <li><strong>Boss at ${BOSS_CONFIG.triggerScore} points.</strong></li>
       </ul>
       <p style="margin:0 0 1.1rem;">Mouse/Touch, A/← & D/→ move, P pause, Esc exit, G start, I infinite</p>
@@ -736,29 +755,28 @@ function maybeShowTutorial(cb){
 /* -------------------- Infinite Unlock -------------------- */
 function unlockInfinite(){
   if(!infiniteUnlocked){
-    infiniteUnlocked = true;
+    infiniteUnlocked=true;
     try { localStorage.setItem(INFINITE_UNLOCK_KEY,'1'); } catch {}
-
-    // If Sticky Keys not previously unlocked, unlock now and note it
     if(!stickyUnlocked){
-      stickyUnlocked = true;
-      stickyJustUnlocked = true;
+      stickyUnlocked=true;
+      stickyJustUnlocked=true;
       try { localStorage.setItem(STICKY_UNLOCK_KEY,'1'); } catch {}
     }
-
     playSfx('infiniteUnlock');
+    markHudDirty();
   }
 }
 
-/* -------------------- Alternate Sticky Unlock (Score Threshold) -------------------- */
+/* -------------------- Alternate Sticky Unlock -------------------- */
 function maybeAlternateStickyUnlock(){
   if(!stickyUnlocked &&
-     !soundwaveUnlocked && // only if player hasn't achieved flawless unlock
+     !soundwaveUnlocked &&
      score >= STICKY_SCORE_UNLOCK_THRESHOLD){
     stickyUnlocked=true;
     try{ localStorage.setItem(STICKY_UNLOCK_KEY,'1'); }catch{}
     spawnFloatText(canvas.width/2, canvas.height*0.35,'STICKY KEYS UNLOCKED!','#ffccff',-90,1600,1.4);
     playSfx('stickyHit');
+    markHudDirty();
   }
 }
 
@@ -772,6 +790,7 @@ function maybeSpawnLifeBlock(){
   if(lastLifeSpawnScore===score) return;
   lastLifeSpawnScore=score;
   spawnLifeBlock();
+  markHudDirty();
 }
 function spawnLifeBlock(){
   loadLifeImage();
@@ -801,13 +820,9 @@ function maybeSpawnBomb(ts){
 function currentActiveBombs(){ return blocks.filter(b=>b.mode==='bomb' && !b._remove).length; }
 function spawnBombBurst(){
   if(currentActiveBombs() >= BOMB_CONFIG.maxConcurrent) return;
-
-  // Always spawn at least one
   spawnBomb();
-
   const ratio  = Math.min(1, score / (BOMB_CONFIG.scoreRampForMulti || 1));
   const chance = BOMB_CONFIG.multiSpawnChanceBase + ratio * BOMB_CONFIG.multiSpawnChanceScoreBoost;
-
   let extra = 0;
   while(extra < BOMB_CONFIG.multiSpawnMax){
     if(currentActiveBombs() >= BOMB_CONFIG.maxConcurrent) break;
@@ -816,23 +831,14 @@ function spawnBombBurst(){
       extra++;
     } else break;
   }
-
   const totalSpawned = 1 + extra;
-
-  // Base sound (full volume)
   playSfx('bombSpawn', { allowOverlap:true, volumeScale:1 });
-
-  // Echo layers: each extra bomb adds a softer, slightly delayed instance
-  // Adjust delayStep, falloff to taste.
-  const delayStepMs = 40;       // gap between echoes
-  const falloffPer  = 0.25;     // how much volume reduces each echo
-  const minVolume   = 0.15;     // floor so faint echoes are still audible
-
+  const delayStepMs = 40;
+  const falloffPer  = 0.25;
+  const minVolume   = 0.15;
   for(let i=1; i<totalSpawned; i++){
-    const atten = Math.max(minVolume, 1 - i * falloffPer);
-    setTimeout(()=>{
-      playSfx('bombSpawn', { allowOverlap:true, volumeScale:atten });
-    }, i * delayStepMs);
+    const atten=Math.max(minVolume, 1 - i*falloffPer);
+    setTimeout(()=> playSfx('bombSpawn',{allowOverlap:true, volumeScale:atten}), i*delayStepMs);
   }
 }
 function spawnBomb(){
@@ -854,7 +860,7 @@ function spawnBomb(){
   });
 }
 
-/* -------------------- Sticky Keys (Lock) -------------------- */
+/* -------------------- Sticky Keys -------------------- */
 function maybeSpawnSticky(ts){
   if(!stickyUnlocked) return;
   if(!STICKY_KEYS.enabled) return;
@@ -896,48 +902,48 @@ function spawnSticky(){
   playSfx('stickySpawn');
 }
 function handleStickyHit(){
-  const now = performance.now();
-  if (stickyKeysActive) {
-    stickyKeysEnd = now + STICKY_KEYS.durationMs;
-    if (stickyLockAnim) {
-      stickyLockAnim.phase = 'pulse';
-      stickyLockAnim.pulseUntil = now + 400;
+  const now=performance.now();
+  if(stickyKeysActive){
+    stickyKeysEnd=now + STICKY_KEYS.durationMs;
+    if(stickyLockAnim){
+      stickyLockAnim.phase='pulse';
+      stickyLockAnim.pulseUntil=now + 400;
     }
-    spawnFloatText(paddleX + DIFFICULTY.paddleWidth/2, canvas.height - 130,
-      'LOCK EXTENDED','#ffd1ff', -60, 900, 1.05);
+    spawnFloatText(paddleX + DIFFICULTY.paddleWidth/2, canvas.height - 130,'STICKINESS EXTENDED','#ffd1ff', -60, 900, 1.05);
     return;
   }
-  stickyKeysActive = true;
-  stickyKeysEnd = now + STICKY_KEYS.durationMs;
-  stickyLockX = paddleX;
+  stickyKeysActive=true;
+  stickyKeysEnd=now + STICKY_KEYS.durationMs;
+  stickyLockX=paddleX;
   playSfx('stickyHit');
-  spawnFloatText(paddleX + DIFFICULTY.paddleWidth/2,
-    canvas.height - 130,'TASKBAR LOCKED','#ffb8ff', -70, 1100, 1.2);
+  spawnFloatText(paddleX + DIFFICULTY.paddleWidth/2, canvas.height - 130,'STICKY TASKBAR','#ffb8ff', -70, 1100, 1.2);
   triggerShake(10,300,'all');
-  stickyLockAnim = {
-    phase: 'enter',
-    start: now,
-    lockX: paddleX + DIFFICULTY.paddleWidth/2,
-    lockY: canvas.height - 90 - (STICKY_KEYS.lockYOffset || 30)
+  stickyLockAnim={
+    phase:'enter',
+    start:now,
+    lockX:paddleX + DIFFICULTY.paddleWidth/2,
+    lockY:canvas.height - 90 - (STICKY_KEYS.lockYOffset || 30)
   };
+  markHudDirty();
 }
 function maybeEndSticky(){
-  if (!stickyKeysActive) return;
-  const now = performance.now();
-  if (now > stickyKeysEnd) {
-    if (stickyLockAnim && stickyLockAnim.phase !== 'exit') {
-      stickyLockAnim.phase = 'exit';
-      stickyLockAnim.start = now;
+  if(!stickyKeysActive) return;
+  const now=performance.now();
+  if(now > stickyKeysEnd){
+    if(stickyLockAnim && stickyLockAnim.phase!=='exit'){
+      stickyLockAnim.phase='exit';
+      stickyLockAnim.start=now;
     }
-    stickyKeysActive = false;
-    stickyLockX = null;
+    stickyKeysActive=false;
+    stickyLockX=null;
     playSfx('stickyEnd');
     spawnFloatText(paddleX + DIFFICULTY.paddleWidth/2,
-      canvas.height - 120,'LOCK CLEARED','#cccccc', -60, 900, 1);
+      canvas.height - 120,'TASKBAR UNSTUCK','#cccccc', -60, 900, 1);
+    markHudDirty();
   }
 }
 
-/* -------------------- SNIP (Power-Up) -------------------- */
+/* -------------------- SNIP -------------------- */
 function maybeSpawnSnip(ts){
   if(!SNIP_POWERUP.enabled) return;
   if(bossActive||bossDying||snipReady) return;
@@ -977,6 +983,8 @@ function resetSnipState(){
   snipDragging=false; snipDragStarted=false;
   snipRect=null; snipDragOrigin=null;
   snipExecuted=false;
+  snipMultiTouch=false;
+  markHudDirty();
 }
 function beginSnipReady(){
   snipReady=true;
@@ -986,7 +994,9 @@ function beginSnipReady(){
   snipDragging=false;
   snipDragStarted=false;
   snipExecuted=false;
+  snipMultiTouch=false;
   playSfx('snipPickup');
+  markHudDirty();
 }
 function executeSnip(rect){
   if(!rect) return;
@@ -1086,7 +1096,7 @@ function executeSnip(rect){
         const cx=b.x+b.w/2, cy=b.y+b.h/2;
         spawnPowerupVanishFX({
           x:cx,y:cy,img:stickyImg,imgReady:stickyImgReady,
-          label:b.label,color:'rgba(255,255,255,0.35)',
+            label:b.label,color:'rgba(255,255,255,0.35)',
           iconScale:STICKY_KEYS.iconScale,baseRadius:b.w/2
         });
         blocks.splice(i,1);
@@ -1117,6 +1127,7 @@ function executeSnip(rect){
   }
 
   resetSnipState();
+  markHudDirty();
 }
 function cancelSnip(){
   if(!snipReady) return;
@@ -1172,6 +1183,7 @@ function activateShield(){
     canvas.height - 140,
     extending?'SHIELD REFRESH':'SHIELD ON',
     '#64c9ff', -80, 1200, 1.1);
+  markHudDirty();
 }
 function maybeExpireShield(){
   if(shieldActive && performance.now() >= shieldEndTime){
@@ -1179,6 +1191,7 @@ function maybeExpireShield(){
     playSfx('shieldExpire');
     spawnFloatText(paddleX + DIFFICULTY.paddleWidth/2,
       canvas.height - 140,'SHIELD OFF','#9fb6c2',-70,1000,1);
+    markHudDirty();
   }
 }
 function renderShieldAura(){
@@ -1283,6 +1296,7 @@ function activateTaskManager(){
     slowMoFactor=TASKMGR_POWERUP.slowMoFactor;
     slowMoEnd=performance.now() + TASKMGR_POWERUP.slowMoDurationMs;
   }
+  markHudDirty();
 }
 
 /* -------------------- Soundwave -------------------- */
@@ -1363,11 +1377,12 @@ function activateSoundwave(cx,cy){
           }
         }
       }
+      markHudDirty();
     }, i * SOUNDWAVE_POWERUP.pulseIntervalMs);
   }
 }
 
-/* -------------------- Lock Animation Rendering -------------------- */
+/* -------------------- Sticky Lock Render -------------------- */
 function renderStickyLockAnim(){
   if (!stickyLockAnim) return;
   const now = performance.now();
@@ -1452,7 +1467,6 @@ function renderStickyLockAnim(){
     ctx.drawImage(stickyLockImgOpen, -drawW/2, -drawH/2, drawW, drawH);
     ctx.imageSmoothingEnabled=prevSmooth;
   } else {
-    /* Vector fallback */
     const bodyW=48, bodyH=40, bodyR=8;
     ctx.fillStyle='rgba(40,40,55,0.9)';
     roundedRect(ctx,-bodyW/2,-bodyH/2,bodyW,bodyH,bodyR);
@@ -1505,6 +1519,7 @@ function startBossDeathAnimation(){
   spawnBossDeathParticles();
   triggerShake(SHAKE_DEATH_INTENSITY,SHAKE_DEATH_DURATION,'all');
   playSfx('bossDeath');
+  markHudDirty();
 }
 function spawnBossDeathParticles(){
   const box={x:canvas.width/2 - BOSS_CONFIG.width/2,y:BOSS_CONFIG.topY,
@@ -1575,8 +1590,10 @@ function updateBossDeathAnimation(ts){
 }
 
 /* -------------------- FX Helpers -------------------- */
+const MAX_CATCH_PARTICLES = 1600;
 function spawnCatchParticles(cx,cy,baseColor,count=CATCH_PARTICLE_COUNT_BASE){
   for(let i=0;i<count;i++){
+    if(catchParticles.length >= MAX_CATCH_PARTICLES) break;
     const ang=Math.random()*Math.PI*2;
     const spd=randBetween(60,180);
     catchParticles.push({
@@ -1590,7 +1607,11 @@ function spawnCatchParticles(cx,cy,baseColor,count=CATCH_PARTICLE_COUNT_BASE){
     });
   }
 }
+const MAX_FLOAT_TEXT = 180;
 function spawnFloatText(x,y,text,color='#ffffff',rise=-50,dur=900,scale=1){
+  if(floatTexts.length >= MAX_FLOAT_TEXT){
+    floatTexts.shift();
+  }
   floatTexts.push({x,y,vy:rise/dur,text,color,life:0,maxLife:dur,scale});
 }
 function spawnRingPulse(x,y,color='rgba(32,214,114,0.55)',radius=LIFE_PULSE_RADIUS,dur=600){
@@ -1769,6 +1790,7 @@ function handleBombHit(b){
     if(lives<=0) endGame(false);
     else spawnFloatText(b.x + b.w/2,b.y + b.h/2 + 8, `-${BOMB_CONFIG.lifeCost} LIFE`,
       '#ff6666', -60, 900, 1.1);
+    markHudDirty();
   } else {
     spawnFloatText(b.x + b.w/2,b.y + b.h/2 + 8,'SAFE','#8ae3ff',-50,850,1);
   }
@@ -1905,26 +1927,10 @@ function drawStickyHazard(b,now){
   ctx.restore();
 }
 
-/* -------------------- Slow Motion Combining -------------------- */
-function adjustDtForSlowMo(rawDt){
-  let factor=1;
-  if(slowMoActive){
-    if(performance.now() > slowMoEnd){
-      slowMoActive=false;
-      slowMoFactor=1;
-    } else factor*=slowMoFactor;
-  }
-  if(activeSoundwaveSlowMo){
-    if(performance.now() > activeSoundwaveSlowMoEnd){
-      activeSoundwaveSlowMo=false;
-    } else factor*=SOUNDWAVE_POWERUP.slowMoFactor;
-  }
-  return rawDt*factor;
-}
-
-/* -------------------- Main Loop -------------------- */
+/* -------------------- Game Loop -------------------- */
 function gameLoop(ts){
   if(!gameActive || gamePaused || nukeTriggered) return;
+  frameCounter++;
   const rawDt=(ts - lastTs)/1000;
   const dt=adjustDtForSlowMo(rawDt);
   const dtMs=(ts - lastTs);
@@ -1932,7 +1938,6 @@ function gameLoop(ts){
 
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  /* Alternate sticky unlock check */
   maybeAlternateStickyUnlock();
 
   if(stickyKeysActive && stickyLockX!==null){
@@ -1951,7 +1956,6 @@ function gameLoop(ts){
   maybeExpireShield();
   maybeEndSticky();
 
-  // Shake
   let offX=0, offY=0;
   if(shakeStart){
     const et=performance.now() - shakeStart;
@@ -2083,6 +2087,7 @@ function gameLoop(ts){
             spawnFloatText(centerX,centerY - 10,'MAX','#cccccc',-50,900,1);
             playSfx('lifeMax');
           }
+          markHudDirty();
           return;
         }
 
@@ -2102,7 +2107,7 @@ function gameLoop(ts){
             iconScale:0.85,baseRadius:Math.min(b.w,b.h)/2
           });
           spawnCatchParticles(centerX,centerY,'#ff9f40',14);
-          spawnFloatText(centerX,centerY - 14,`-${dmg}`,'#ffb14a',-70,900,1.05);
+            spawnFloatText(centerX,centerY - 14,`-${dmg}`,'#ffb14a',-70,900,1.05);
           maybeSpawnLifeBlock();
           const totalDamage=BOSS_CONFIG.health - bossHealth;
           if(totalDamage>0 && totalDamage % BOSS_CONFIG.dropIntervalReduceEvery===0){
@@ -2118,7 +2123,7 @@ function gameLoop(ts){
           score++;
           playSfx(tiny?'catchTiny':'catchBlock');
           const color=tiny?'#ffd257':'#58c2ff';
-            spawnPowerupVanishFX({
+          spawnPowerupVanishFX({
             x:centerX,y:centerY,img:null,imgReady:false,
             label:b.label,color:tiny?'rgba(255,210,87,0.45)':'rgba(88,194,255,0.45)',
             iconScale:0.8,baseRadius:Math.min(b.w,b.h)/2
@@ -2132,11 +2137,11 @@ function gameLoop(ts){
             DIFFICULTY.baseSpawnInterval - score*DIFFICULTY.scoreSpawnReduction
           );
         }
+        markHudDirty();
       }
     });
   }
 
-  // Miss / cleanup
   const nowTime=performance.now();
   const startImmune=(nowTime - gameStartTime) < START_IMMUNITY_MS;
   for(let i=blocks.length-1;i>=0;i--){
@@ -2146,8 +2151,8 @@ function gameLoop(ts){
     if(!b.exploding && b.y > canvas.height + 60){
       if(!b.caught){
         if(b.mode==='life') playSfx('lifeMiss');
-        else if(b.mode==='bomb'){ /* ignored */ }
-        else if(['snip','shield','taskmgr','soundwave','sticky'].includes(b.mode)){ /* ignore */ }
+        else if(b.mode==='bomb'){ /* ignore fall */ }
+        else if(['snip','shield','taskmgr','soundwave','sticky'].includes(b.mode)){ /* ignore miss */ }
         else if(!startImmune && !bossDying){
           if(shieldActive){
             playSfx('shieldBlock');
@@ -2162,6 +2167,7 @@ function gameLoop(ts){
             playSfx('miss');
             triggerShake(SHAKE_LIFE_LOST_INTENSITY,SHAKE_LIFE_LOST_DURATION,'x');
             if(lives<=0) endGame(false);
+            markHudDirty();
           }
         }
       }
@@ -2183,7 +2189,12 @@ function gameLoop(ts){
   }
 
   ctx.restore();
-  updateHUD();
+
+  if(hudDirty || (frameCounter % 12 === 0)){
+    updateHUD();
+    hudDirty=false;
+  }
+
   if(gameActive && !nukeTriggered) rafId=requestAnimationFrame(gameLoop);
 }
 
@@ -2195,7 +2206,7 @@ function renderSnipOverlay(){
   ctx.font='600 18px Segoe UI,Inter,sans-serif';
   ctx.fillStyle='#ffffff';
   ctx.textAlign='center';
-  ctx.fillText('SNIP MODE: Drag to select area', canvas.width/2, 70);
+  ctx.fillText('SNIP MODE: Drag (mouse / 1 finger) or 2-finger box', canvas.width/2, 70);
   const remaining=Math.max(0,SNIP_POWERUP.aimTimeoutMs - (performance.now() - snipAimStart));
   ctx.font='500 13px Segoe UI,Inter,sans-serif';
   ctx.fillText(`${Math.ceil(remaining/1000)}s`, canvas.width/2, 96);
@@ -2209,7 +2220,7 @@ function renderSnipOverlay(){
   ctx.restore();
 }
 
-/* -------------------- Pointer / Touch for SNIP -------------------- */
+/* -------------------- Pointer / Touch for SNIP / Paddle -------------------- */
 function pointerCanvasPos(e){
   const rect=canvas.getBoundingClientRect();
   return {
@@ -2217,6 +2228,7 @@ function pointerCanvasPos(e){
     y:(e.clientY - rect.top)/rect.height*canvas.height
   };
 }
+
 function onPointerDown(e){
   if(!snipReady) return;
   e.preventDefault();
@@ -2244,19 +2256,121 @@ function onPointerUp(){
   if(snipDragStarted && snipRect && snipRect.w>4 && snipRect.h>4) executeSnip(snipRect);
   else cancelSnip();
 }
+
+/* ---- Touch (Enhanced for Mobile Snip) ---- */
 function onTouchStart(e){
-  if(!snipReady) return;
-  if(e.touches.length>1) return;
-  onPointerDown(e.touches[0]);
+  if(!gameActive || gamePaused || nukeTriggered || bossDying) return;
+
+  if(!snipReady){
+    if(e.touches.length === 1){
+      const t = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      paddleX = (t.clientX - rect.left)/rect.width*canvas.width - DIFFICULTY.paddleWidth/2;
+      clampPaddle();
+    }
+    return;
+  }
+  e.preventDefault();
+
+  const now=performance.now();
+  if(now - snipLastTapTime < SNIP_DOUBLE_TAP_MS){
+    cancelSnip();
+    return;
+  }
+  snipLastTapTime=now;
+
+  if(e.touches.length === 1){
+    snipMultiTouch=false;
+    const t=e.touches[0];
+    const p=pointerCanvasPos(t);
+    snipDragOrigin=p;
+    snipRect={x:p.x,y:p.y,w:0,h:0};
+    snipDragging=true;
+    snipDragStarted=false;
+  } else if(e.touches.length >= 2){
+    snipMultiTouch=true;
+    snipDragging=true;
+    snipDragStarted=true;
+    updateSnipRectFromTouches(e.touches);
+  }
 }
 function onTouchDrag(e){
-  if(!snipReady) return;
-  if(e.touches.length>1) return;
-  onPointerMove(e.touches[0]);
+  if(!gameActive || gamePaused || nukeTriggered || bossDying) return;
+
+  if(!snipReady){
+    if(e.touches.length===1){
+      const t=e.touches[0];
+      const rect=canvas.getBoundingClientRect();
+      paddleX=(t.clientX - rect.left)/rect.width*canvas.width - DIFFICULTY.paddleWidth/2;
+      clampPaddle();
+    }
+    return;
+  }
+  if(!snipDragging) return;
+  e.preventDefault();
+
+  if(e.touches.length >= 2){
+    snipMultiTouch=true;
+    updateSnipRectFromTouches(e.touches);
+    return;
+  }
+
+  const t=e.touches[0];
+  const p=pointerCanvasPos(t);
+  const ox=snipDragOrigin.x;
+  const oy=snipDragOrigin.y;
+  snipRect.x=Math.min(ox,p.x);
+  snipRect.y=Math.min(oy,p.y);
+  snipRect.w=Math.abs(p.x - ox);
+  snipRect.h=Math.abs(p.y - oy);
+  if(!snipDragStarted && (snipRect.w>6 || snipRect.h>6)){
+    snipDragStarted=true;
+    playSfx('snipDragStart');
+  }
 }
 function onTouchEnd(e){
-  if(!snipReady) return;
-  onPointerUp(e.changedTouches[0]);
+  if(!snipReady){
+    return;
+  }
+  if(e.touches && e.touches.length>0){
+    if(snipMultiTouch){
+      updateSnipRectFromTouches(e.touches);
+    }
+    return;
+  }
+  if(!snipDragging) return;
+  snipDragging=false;
+  if(!snipRect){
+    cancelSnip();
+    return;
+  }
+  if(snipRect.w < SNIP_MIN_TOUCH_SIZE && snipRect.h < SNIP_MIN_TOUCH_SIZE){
+    cancelSnip();
+    return;
+  }
+  executeSnip(snipRect);
+}
+
+function updateSnipRectFromTouches(touches){
+  if(!snipRect) snipRect={x:0,y:0,w:0,h:0};
+  const rect=canvas.getBoundingClientRect();
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for(let i=0;i<touches.length;i++){
+    const t=touches[i];
+    const cx=(t.clientX - rect.left)/rect.width*canvas.width;
+    const cy=(t.clientY - rect.top)/rect.height*canvas.height;
+    if(cx<minX) minX=cx;
+    if(cy<minY) minY=cy;
+    if(cx>maxX) maxX=cx;
+    if(cy>maxY) maxY=cy;
+  }
+  if(minX===Infinity){
+    snipRect.w=snipRect.h=0; return;
+  }
+  snipRect.x=minX;
+  snipRect.y=minY;
+  snipRect.w=Math.max(0,maxX-minX);
+  snipRect.h=Math.max(0,maxY-minY);
 }
 
 /* -------------------- HUD -------------------- */
@@ -2308,7 +2422,7 @@ function flashBG(color){
   }, EFFECTS.flashDuration);
 }
 
-/* -------------------- Input & Utility -------------------- */
+/* -------------------- Input -------------------- */
 function clampPaddle(){
   const m=DIFFICULTY.paddleEdgeMargin;
   if(paddleX<m) paddleX=m;
@@ -2332,6 +2446,7 @@ function onTouchMove(e){
   if(!gameActive||gamePaused||nukeTriggered||bossDying) return;
   if(snipReady) return;
   if(stickyKeysActive) return;
+  if(e.touches.length!==1) return;
   const t=e.touches[0];
   const rect=canvas.getBoundingClientRect();
   paddleX=(t.clientX - rect.left)/rect.width*canvas.width - DIFFICULTY.paddleWidth/2;
@@ -2392,17 +2507,8 @@ function exitGame(){
   if(flashBG._t){ clearTimeout(flashBG._t); flashBG._t=null; }
   overlayEl.style.background=BASE_OVERLAY_BG;
   showPlayPrompt();
-  fadeOutAndStopMusic(600); // gentle fade
-  window.removeEventListener('resize',resizeCanvas);
-  window.removeEventListener('mousemove',onMouseMove);
-  window.removeEventListener('touchmove',onTouchMove);
-  window.removeEventListener('keydown',onGameKey);
-  window.removeEventListener('mousedown',onPointerDown);
-  window.removeEventListener('mouseup',onPointerUp);
-  window.removeEventListener('mousemove',onPointerMove);
-  window.removeEventListener('touchstart',onTouchStart);
-  window.removeEventListener('touchend',onTouchEnd);
-  window.removeEventListener('touchmove',onTouchDrag);
+  fadeOutAndStopMusic(600);
+  unbindGameListeners();
   gameActive=false;
   playSfx('uiSelect');
 }
@@ -2435,25 +2541,26 @@ function showStartLivesBanner(){
   setTimeout(()=>div.remove(),2300);
 }
 
-/* -------------------- End Game -------------------- */
-function endGame(victory=false){
-  if(nukeTriggered) return;
-  if(victory) unlockInfinite();
+/* -------------------- End Game (Enhanced) -------------------- */
+function endGame(victory = false){
+  if (nukeTriggered) return;
 
-  if(victory){
-  if(infiniteMode){
-    playMusic('infinite');
-  } else if(!REQUIRE_PERFECT_VICTORY){ // or your condition
-    playMusic('normal', { force:true });
+  if (victory) unlockInfinite();
+
+  if (victory){
+    if (infiniteMode){
+      playMusic('infinite');
+    } else if (!REQUIRE_PERFECT_VICTORY){
+      playMusic('normal', { force:true });
+    }
+  } else {
+    fadeOutAndStopMusic();
   }
-} else {
-  fadeOutAndStopMusic();
-}
 
-  if(infiniteMode){
+  if (infiniteMode){
     if(!victory && REDIRECT_ON_LOSS && INFINITE_REDIRECT_ON_LOSS){
       playSfx('gameOver');
-      window.location.href=LOSS_REDIRECT_URL;
+      window.location.href = LOSS_REDIRECT_URL;
       return;
     }
     finalizeInfiniteScreen();
@@ -2461,60 +2568,149 @@ function endGame(victory=false){
   }
 
   const flawless = victory && !lifeEverLost;
-  if(flawless && !soundwaveUnlocked){
-  soundwaveUnlocked = true;
-  soundwaveJustUnlocked = true;
-  try { localStorage.setItem(SOUNDWAVE_UNLOCK_KEY,'1'); } catch {}
-}
+
+  if (flawless && !soundwaveUnlocked){
+    soundwaveUnlocked = true;
+    soundwaveJustUnlocked = true;
+    try { localStorage.setItem(SOUNDWAVE_UNLOCK_KEY,'1'); } catch {}
+  }
 
   const shouldNuke = (!victory) || (victory && REQUIRE_PERFECT_VICTORY && lifeEverLost);
-
-  if(shouldNuke){
-    if(REDIRECT_ON_LOSS){
+  if (shouldNuke){
+    if (REDIRECT_ON_LOSS){
       playSfx('gameOver');
-      window.location.href=LOSS_REDIRECT_URL;
+      window.location.href = LOSS_REDIRECT_URL;
       return;
     }
     playSfx('nuke');
-    triggerNuke(!victory ? 'Defenses collapsed.'
+    triggerNuke(!victory
+      ? 'Defenses collapsed.'
       : 'Win detected, but insufficient purity (lives lost).');
-    gameActive=false; nukeTriggered=true; return;
+    gameActive = false;
+    nukeTriggered = true;
+    return;
   }
 
-  gameActive=false;
+  gameActive = false;
   updateHighScoreIfNeeded();
 
-  if(flawless && SHOW_ESU_SCREEN){
-  playSfx('flawless');
+  const useEnhancedVictoryUI =
+    (flawless && SHOW_ESU_SCREEN) ||
+    (!flawless && (stickyJustUnlocked || stickyUnlocked));
 
-  const unlockLines = [];
-  if(soundwaveJustUnlocked)
-    unlockLines.push('<p style="margin:0;font-size:.75rem;color:#cdb8ff;">Soundwave power-up unlocked!</p>');
-  if(stickyJustUnlocked)
-    unlockLines.push('<p style="margin:0;font-size:.75rem;color:#ffccff;">Sticky Keys hazard unlocked!</p>');
+  if (useEnhancedVictoryUI){
+    if (flawless) playSfx('flawless');
+    else playSfx('victory');
 
+    const unlockLines = [];
+
+    if (soundwaveJustUnlocked){
+      unlockLines.push(
+        '<p style="margin:0;font-size:.75rem;color:#cdb8ff;">Soundwave power-up unlocked!</p>'
+      );
+    }
+
+    if (!flawless && (stickyJustUnlocked || stickyUnlocked)){
+      if (stickyJustUnlocked){
+        unlockLines.push(
+          '<p style="margin:0;font-size:.75rem;color:#ffccff;">Sticky Keys hazard unlocked!</p>'
+        );
+      } else {
+        unlockLines.push(
+          '<p style="margin:0;font-size:.75rem;color:#ffccff;opacity:.85;">Sticky Keys hazard active.</p>'
+        );
+      }
+    } else if (stickyJustUnlocked){
+      unlockLines.push(
+        '<p style="margin:0;font-size:.75rem;color:#ffccff;">Sticky Keys hazard unlocked!</p>'
+      );
+    }
+
+    const title = flawless
+      ? 'Extended Security Updates Granted'
+      : 'System Defended';
+    const subtitle = flawless
+      ? `You defeated <strong>${BOSS_CONFIG.label}</strong> flawlessly.`
+      : `You defeated <strong>${BOSS_CONFIG.label}</strong>.`;
+
+    const buttons = `
+      ${(infiniteUnlocked ? '<button class="esu-btn" data-act="infinite">Infinite (I)</button>' : '')}
+      <button class="esu-btn" data-act="replay">Replay (R)</button>
+      <button class="esu-btn" data-act="exit">Exit (Esc)</button>
+    `;
+
+    msgEl.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:1.1rem;max-width:600px;">
+        <h2 style="margin:0;font-weight:300;letter-spacing:1px;font-size:2.2rem;">${title}</h2>
+        <p style="margin:0;line-height:1.4;">${subtitle}</p>
+        <p style="margin:0;font-size:.8rem;opacity:.75;">Score: ${score} — High: ${highScore}${newHigh ? ' <span class="tag-new">NEW!</span>' : ''}</p>
+        ${unlockLines.length
+          ? unlockLines.join('')
+          : '<p style="margin:0;font-size:.75rem;opacity:.6;">(No new unlocks)</p>'}
+        <div style="display:flex;flex-wrap:wrap;gap:.6rem;justify-content:center;">
+          ${buttons}
+        </div>
+      </div>`;
+    styleESUButtons();
+    msgEl.classList.add('show');
+    wireESUButtons();
+    markHudDirty();
+    return;
+  }
+
+  playSfx('victory');
+  const showInfiniteBtn = infiniteUnlocked
+    ? '<button class="esu-btn" data-act="infinite">Infinite (I)</button>'
+    : '';
   msgEl.innerHTML = `
-    <div style="display:flex;flex-direction:column;align-items:center;gap:1.1rem;max-width:600px;">
-      <h2 style="margin:0;font-weight:300;letter-spacing:1px;font-size:2.2rem;">Extended Security Updates Granted</h2>
-      <p style="margin:0;line-height:1.4;">You defeated <strong>${BOSS_CONFIG.label}</strong> flawlessly.</p>
-      <p style="margin:0;font-size:.8rem;opacity:.75;">Score: ${score} — High: ${highScore}${newHigh?' <span class="tag-new">NEW!</span>':''}</p>
-      ${unlockLines.join('') || '<p style="margin:0;font-size:.75rem;opacity:.6;">(No new unlocks)</p>'}
+    <div style="display:flex;flex-direction:column;align-items:center;gap:1rem;max-width:520px;">
+      <h2 style="margin:0;font-weight:300;letter-spacing:.5px;font-size:2.1rem;">Victory</h2>
+      <p style="margin:0;font-size:.85rem;opacity:.8;">Defended vs <strong>${BOSS_CONFIG.label}</strong></p>
+      <p style="margin:0;font-size:.75rem;opacity:.75;">Score: ${score} — High: ${highScore}${newHigh ? ' <span class="tag-new">NEW!</span>' : ''}</p>
       <div style="display:flex;flex-wrap:wrap;gap:.6rem;justify-content:center;">
-        <button class="esu-btn" data-act="infinite">Infinite (I)</button>
+        ${showInfiniteBtn}
         <button class="esu-btn" data-act="replay">Replay (R)</button>
         <button class="esu-btn" data-act="exit">Exit (Esc)</button>
       </div>
+      <p style="margin:0;font-size:.6rem;opacity:.55;">Keys: ${infiniteUnlocked ? 'I ' : ''}R Esc</p>
     </div>`;
-  styleESUButtons(); msgEl.classList.add('show'); wireESUButtons(); return;
+  styleESUButtons();
+  msgEl.classList.add('show');
+  wireESUButtons();
+  markHudDirty();
 }
 
-  playSfx('victory');
-  msgEl.innerHTML=
-    `Victory!${flawless?' (Flawless!)':''}<br>`+
-    `<span style="font-size:.6em;opacity:.85">Score: ${score} — High: ${highScore}`+
-    `${newHigh?' <span class="tag-new">NEW!</span>':''}<br>`+
-    `I: Infinite &nbsp; R: Replay &nbsp; Esc: Exit</span>`;
+/* -------------------- Infinite Mode End Screen (Parity) -------------------- */
+function finalizeInfiniteScreen(){
+  gameActive = false;
+  updateHighScoreIfNeeded();
+  playSfx('gameOver');
+
+  const scoreLine = `Score: ${score} — High: ${highScore}${newHigh ? ' <span class="tag-new">NEW!</span>' : ''}`;
+
+  const buttons = `
+    <button class="esu-btn" data-act="infinite">Restart Infinite (I)</button>
+    <button class="esu-btn" data-act="boss">Boss Mode (G)</button>
+    <button class="esu-btn" data-act="exit">Exit (Esc)</button>
+  `;
+
+  msgEl.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;gap:1.05rem;max-width:620px;">
+      <h2 style="margin:0;font-weight:300;letter-spacing:.5px;font-size:2.15rem;">Infinite Run Complete</h2>
+      <p style="margin:0;font-size:.85rem;opacity:.8;line-height:1.35;">
+        Waves of updates eventually overwhelmed your defenses.
+      </p>
+      <p style="margin:0;font-size:.8rem;opacity:.75;">${scoreLine}</p>
+      <div style="display:flex;flex-wrap:wrap;gap:.6rem;justify-content:center;">
+        ${buttons}
+      </div>
+      <p style="margin:0;font-size:.6rem;opacity:.55;">Keys: I G Esc</p>
+    </div>
+  `;
+  styleESUButtons();
   msgEl.classList.add('show');
+  wireESUButtons();
+  markHudDirty();
 }
 
 /* -------------------- End Game Helpers -------------------- */
@@ -2536,40 +2732,29 @@ function wireESUButtons(){
     b.addEventListener('click',()=>{
       playSfx('uiSelect');
       const act=b.dataset.act;
-      if(act==='infinite') startInfiniteGame();
-      else if(act==='replay') startGame();
-      else if(act==='exit') exitGame();
+      if(act==='infinite')      startInfiniteGame();
+      else if(act==='replay')   startGame();
+      else if(act==='boss')     startGame();
+      else if(act==='exit')     exitGame();
     });
   });
-}
-function finalizeInfiniteScreen(){
-  gameActive=false;
-  updateHighScoreIfNeeded();
-  playSfx('gameOver');
-  msgEl.innerHTML=
-    `Infinite Mode Over<br>`+
-    `<span style="font-size:.6em;opacity:.85">Score: ${score} — High: ${highScore}`+
-    `${newHigh?' <span class="tag-new">NEW!</span>':''}<br>`+
-    `I: Restart Infinite &nbsp; G: Boss Mode &nbsp; Esc: Exit</span>`;
-  msgEl.classList.add('show');
 }
 function updateHighScoreIfNeeded(){
   if(score>highScore){
     highScore=score; newHigh=true;
     try{ localStorage.setItem(HIGH_SCORE_KEY, highScore); }catch{}
+    markHudDirty();
   }
 }
 
 /* -------------------- Spawn Normal / Hazards -------------------- */
 function spawnBlock(){
   if(bossActive || bossDying || (!infiniteMode && score >= BOSS_CONFIG.triggerScore && !bossActive)) return;
-  const tier=SIZE_TIERS[Math.floor(Math.random()*SIZE_TIERS.length)];
-  const pad=14;
-  ctx.save(); ctx.font=BLOCK_STYLE.textFont;
-  const textW=ctx.measureText(tier.label).width;
-  ctx.restore();
-  const w=Math.max(54, Math.ceil(textW + pad*2));
-  const h=36;
+  const tier=sizeTierCache
+    ? sizeTierCache[Math.floor(Math.random()*sizeTierCache.length)]
+    : { label:'-KB', speedFactor:1, textColor:'#0078d7', glowColor:null, width:90, height:36 };
+  const w=tier.width;
+  const h=tier.height;
   const x=Math.random()*(canvas.width - w - 80)+40;
   const baseSpeed=randBetween(...DIFFICULTY.baseSpeedRange);
   const speed=baseSpeed * tier.speedFactor * (1 + score * DIFFICULTY.scoreSpeedFactor);
@@ -2608,10 +2793,8 @@ function spawnBossHazard(){
     caught:false
   });
 
-  // --- New: play hazard drop SFX with mild throttle & class-based volume tweak ---
-  const now = performance.now();
+  const now=performance.now();
   if (now - lastBossHazardSfx > 120) {
-    // Slight volume scaling: 'extreme' a little louder
     const vol = hz.class === 'extreme' ? 1.0 : 0.85;
     playSfx('bossHazardDrop', { allowOverlap: true, volumeScale: vol });
     lastBossHazardSfx = now;
@@ -2627,9 +2810,10 @@ function maybeStartBoss(){
     blocks=[];
     flashBG('rgba(255,255,255,0.55)');
     playSfx('bossSpawn');
-    playMusic('boss');  // crossfades from normal to boss
+    playMusic('boss');
     resetSnipState();
     shieldActive=false;
+    markHudDirty();
   }
 }
 function updateBoss(ts){

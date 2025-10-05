@@ -58,7 +58,7 @@ export const DISINTEGRATION_CONFIG = {
 
 /* ===== Life Block ===== */
 export const LIFE_BLOCK = {
-  normalInterval: 20,
+  normalInterval: 25,
   infiniteInterval: 50,
   size: 40,
   speedMultiplier: 4.2,
@@ -364,7 +364,7 @@ export const STICKY_KEYS = {
   label: 'STK',
   imageSrc: 'static/sticky.png',
   size: 250,
-  speedRange: [500, 800],
+  speedRange: [1200, 2000],
   spawnIntervalInitial: 8000,
   baseSpawnInterval: 9000,
   spawnIntervalMin: 3500,

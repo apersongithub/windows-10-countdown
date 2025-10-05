@@ -1,5 +1,5 @@
 /* Disintegration & final stage sequence */
-import { DISINTEGRATION_CONFIG as C } from './config.js';
+import { DISINTEGRATION_CONFIG as C, LS_KEYS } from './config.js';
 
 export function runDisintegration() {
   return new Promise(resolve => {
@@ -89,7 +89,7 @@ function createQRParticles(layer){
     for(let x=0;x<cols;x++){
       if(Math.random()<0.45) continue;
       const px=r.left+(x/(cols-1))*r.width;
-      const py=r.top+(y/(rows-1))*r.height;
+      const py=r.top +(y/(rows-1))*r.height;
       spawnDot(layer,px,py);
     }
   }
@@ -108,7 +108,22 @@ function showQuestionStage(resolve){
       const p=document.createElement('p');
       p.textContent=C.finalMessage;
       stage.appendChild(p);
+      // Persist unlock
+      try { localStorage.setItem(LS_KEYS.postStage,'1'); } catch(e){}
       resolve();
     },620);
   }, C.questionHoldMs);
+}
+
+/**
+ * Inject final stage immediately (used when skipping animation on revisit)
+ */
+export function injectFinalStageImmediate() {
+  if (document.querySelector('.final-stage')) return;
+  const stage=document.createElement('div');
+  stage.className='final-stage';
+  stage.style.animation='none';
+  stage.style.opacity='1';
+  stage.innerHTML = `<p style="font-size:clamp(1rem,1.9vw,2rem); letter-spacing:.5px;">${C.finalMessage}</p>`;
+  document.body.appendChild(stage);
 }

@@ -57,3 +57,4 @@ function updateCountdown(now){
     ? `${d}d ${formatNum(h)}h ${formatNum(m)}m ${formatNum(s)}s until Windows 10 End of Support`
     : `${d}d ${formatNum(h)}h ${formatNum(m)}m ${formatNum(s)}s since Windows 10 End of Support`;
 }
+

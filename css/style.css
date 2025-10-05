@@ -1,0 +1,309 @@
+/* Base / Layout */
+body {
+    background: #0078d7;
+    font-family: "Segoe UI Variable Text", "Segoe UI", "Inter", system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+    font-weight: 300;
+    overflow: hidden;
+}
+
+.bsod-main-text {
+    font-weight: 300;
+    letter-spacing: .2px;
+}
+
+.countdown-line span {
+    font-variant-numeric: tabular-nums;
+}
+
+.qr-text p {
+    margin: 0 0 .75rem;
+}
+
+.qr-text p:last-child {
+    margin-bottom: 0;
+}
+
+@media (max-height:540px) {
+    body {
+        overflow-y: auto;
+    }
+}
+
+/* Disintegration Layer */
+#disintegration-layer {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+    overflow: hidden;
+}
+
+.particle-char,
+.particle-dot {
+    position: absolute;
+    color: #fff;
+    font-weight: 300;
+    will-change: transform, opacity;
+    white-space: pre;
+    line-height: 1;
+    font-family: inherit;
+}
+
+.particle-dot {
+    width: 4px;
+    height: 4px;
+    background: #fff;
+    border-radius: 50%;
+}
+
+/* Final Stage (post-disintegration) */
+.final-stage {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 60;
+    text-align: center;
+    color: #ffffff;
+    font-weight: 300;
+    pointer-events: none;
+    opacity: 0;
+    animation: fadeIn .9s ease forwards;
+}
+
+.final-stage h1 {
+    font-size: clamp(4rem, 12vw, 10rem);
+    margin: 0 0 1.5rem;
+    font-weight: 300;
+    letter-spacing: 2px;
+}
+
+.final-stage p {
+    font-size: clamp(1rem, 1.9vw, 2rem);
+    margin: 0;
+    letter-spacing: .5px;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: scale(.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.fade-out {
+    animation: fadeOut .6s ease forwards;
+}
+
+@keyframes fadeOut {
+    to {
+        opacity: 0;
+        transform: scale(.97);
+    }
+}
+
+/* Game Overlay */
+#game-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 44, 92, 0.85);
+    backdrop-filter: blur(4px);
+    display: none;
+    z-index: 80;
+    overflow: hidden;
+}
+
+#game-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+#game-hud {
+    position: absolute;
+    top: 10px;
+    left: 14px;
+    font-size: 14px;
+    line-height: 1.3;
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+    color: #fff;
+    text-shadow: 0 0 4px rgba(0, 0, 0, 0.35);
+    user-select: none;
+    pointer-events: none;
+}
+
+#game-message {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(1.2rem, 2.4vw, 2.6rem);
+    text-align: center;
+    color: #fff;
+    font-weight: 300;
+    letter-spacing: .5px;
+    padding: 1rem;
+    opacity: 0;
+    pointer-events: none;
+}
+
+#game-message.show {
+    animation: gmFade .8s ease forwards;
+}
+
+@keyframes gmFade {
+    to {
+        opacity: 1;
+    }
+}
+
+/* Play Prompt */
+#play-prompt {
+    position: fixed;
+    bottom: 400px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 12px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    letter-spacing: .7px;
+    backdrop-filter: blur(4px);
+    display: none;
+    z-index: 70;
+    cursor: pointer;
+    user-select: none;
+    transition: background .25s;
+}
+
+#play-prompt:hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.pulse {
+    animation: pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: .55;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+.tag-new {
+    background: #20d672;
+    color: #003a19;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 6px;
+    letter-spacing: .5px;
+}
+
+/* Static Upgrade Overlay */
+#nuke-overlay {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle at 32% 28%, #0d3c95 0%, #081d45 60%, #041024 100%);
+    display: none;
+    z-index: 120;
+    color: #eef6ff;
+    font-weight: 300;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    letter-spacing: .4px;
+    padding: 2.2rem 2rem;
+}
+
+#nuke-title {
+    font-size: clamp(2.4rem, 5vw, 4.4rem);
+    font-weight: 300;
+    margin: 0 0 1rem;
+    letter-spacing: 1px;
+}
+
+#nuke-text {
+    font-size: clamp(.95rem, 1.5vw, 1.3rem);
+    line-height: 1.48;
+    max-width: 780px;
+    margin: 0 auto 2.2rem;
+}
+
+#nuke-reason {
+    font-size: clamp(.75rem, 1vw, .95rem);
+    background: rgba(255, 255, 255, 0.08);
+    padding: .75rem 1rem;
+    border-radius: 12px;
+    max-width: 620px;
+    margin: 0 auto 1.8rem;
+    line-height: 1.35;
+    letter-spacing: .5px;
+}
+
+.small-note {
+    font-size: .6rem;
+    opacity: .55;
+    letter-spacing: .8px;
+    margin-top: 1.2rem;
+}
+
+.accent {
+    color: #62d1ff;
+}
+
+#nuke-actions {
+    display: flex;
+    gap: .75rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: .2rem;
+    margin-bottom: 1rem;
+}
+
+.nuke-btn {
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #eef6ff;
+    font-size: .7rem;
+    letter-spacing: .6px;
+    padding: .55rem .95rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background .2s, transform .15s;
+    font-family: inherit;
+    font-weight: 500;
+}
+
+.nuke-btn:hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.nuke-btn:active {
+    transform: scale(.95);
+}
+
+/* Append (or ensure these exist) for tutorial overlay button styling if desired */
+#tutorial-overlay button#tutorial-start:hover {
+  filter:brightness(1.08);
+}
+#tutorial-overlay button#tutorial-start:active {
+  transform:scale(.94);
+}

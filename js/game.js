@@ -2769,10 +2769,15 @@ function endGame(victory = false){
   if (infiniteMode){
     if(!victory && REDIRECT_ON_LOSS && INFINITE_REDIRECT_ON_LOSS){
       playSfx('gameOver');
-  try { sessionStorage.setItem('lossRedirected','1'); } catch {}
-  // Use replace so the game page isn’t kept in history (optional but helps)
-  window.location.replace(LOSS_REDIRECT_URL);
-      return;
+if (REDIRECT_ON_LOSS){
+  playSfx('gameOver');
+  try {
+    sessionStorage.setItem('lossRedirectFlag', '1');        // indicates a loss redirect occurred
+    sessionStorage.setItem('lossRedirectCount', '0');       // reset bounce counter
+  } catch {}
+  window.location.replace(LOSS_REDIRECT_URL);               // replace so history entry is cleaner
+  return;
+}
     }
     finalizeInfiniteScreen();
     return;
@@ -2790,10 +2795,15 @@ function endGame(victory = false){
   if (shouldNuke){
     if (REDIRECT_ON_LOSS){
       playSfx('gameOver');
-  try { sessionStorage.setItem('lossRedirected','1'); } catch {}
-  // Use replace so the game page isn’t kept in history (optional but helps)
-  window.location.replace(LOSS_REDIRECT_URL);
-      return;
+if (REDIRECT_ON_LOSS){
+  playSfx('gameOver');
+  try {
+    sessionStorage.setItem('lossRedirectFlag', '1');        // indicates a loss redirect occurred
+    sessionStorage.setItem('lossRedirectCount', '0');       // reset bounce counter
+  } catch {}
+  window.location.replace(LOSS_REDIRECT_URL);               // replace so history entry is cleaner
+  return;
+}
     }
     playSfx('nuke');
     triggerNuke(!victory

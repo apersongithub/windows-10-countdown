@@ -23,7 +23,7 @@ Use the cursor to navigate the Taskbar's limited vertical axis and intercept the
 | Powerup | Tool | Effect |
 | :--- | :--- | :--- |
 | **Snipping Tool** | ✂️ | Drag to slice through hazards. |
-| **Windows Defender** | 🛡️ | Grants invincibillity. |
+| **Windows Defender** | 🛡️ | Grants invincibillity against everything execept one special hazard. |
 | **Task Manager** | 💻 | Destroys all visible falling hazards. |
 
 ## 🧬 Unlocks

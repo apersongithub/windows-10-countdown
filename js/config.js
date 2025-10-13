@@ -438,7 +438,7 @@ export const EFFECTS = {
 };
 
 export const BOSS_CONFIG = {
-  triggerScore: 50,
+  triggerScore: 75,
   health: 60,
   width: 420,
   height: 76,
